@@ -5,7 +5,7 @@ APK 和 bin 都是可再生产物，`.gitignore` 故意把它们排除在库外�
 
 | 文件 | 大小 | md5 | 构建自 |
 |---|---|---|---|
-| `多普勒App-debug.apk` | 15,790,227 | `91cc421e1dfc2ccf0eeda369afc342c6` | `安卓App` `2d4c608`（`versionName 0.4` / `versionCode 4`），clean 构建 |
+| `多普勒App-debug.apk` | 15,793,359 | `75610cbf9b734928ceaabe978a0a3adf` | `安卓App` `7f30d46`（`versionName 0.5` / `versionCode 5`），clean 构建 |
 | `f4hwn.sstv.doppler.bin` | 101,604 | `586f8cbccab408a359a0cac0a3dddc59` | `固件源码/uvk1-v6.3.0` `819a3ad`（含 `0x0770` 读回 VFO + 断帧斜率外推 + 前面六处） |
 | `F4HWN-Doppler.apk` | 15,670,767 | `68c2c1bd7d63b12dffabed58a70c4fab` | 2026-10-25 15:25 改名前的旧发布包，**不等于当前源码**，仅留作追溯 |
 
@@ -177,3 +177,49 @@ cd 固件源码/uvk1-v6.3.0 && python .gfw.py
 固件这两处的"该看什么"：刷完新 bin 后接管，拧一下旋钮，App 应弹
 「检测到手动调频 +N Hz · 已按读回值重设基准」；然后手机端锁屏 2 s 再解锁，
 频率不该在断帧期间掉回旧值（外推在顶）。
+
+## 22:0x 那一轮：App 0.5 锁屏不断控频 + 放弃 Look4Sat 那条路
+
+### App 0.5（`7f30d46`，15,793,359 / `75610cbf…`）
+
+修的是交接文档的待办 2：**屏幕一灭系统进 Doze，推帧一停，固件 5 s 就按防呆交还
+控制权** —— 用户锁过一次屏，这次过境就白等了，而回来看屏幕还写着"接管中"。
+
+- 新增 `KeepAlive.kt`：控频期间前台服务 + `PARTIAL_WAKE_LOCK`（10 分钟上限
+  的保险），通知栏顺带成了"正在控频"的外部指示。接管开始 start，交还 stop。
+- 服务自带 3 s 看门狗（`CtrlState.takeover` 为假即 `stopSelf()`）。这是必须的：
+  实测 MuMu 上 `stopService()` 有时只把记录留在 AMS 里，服务和 WAKE_LOCK 都还在
+  （连 `am stopservice` 都报 `Error stopping service`）。`KeepAlive.stop()` 现在
+  同时发 `ACTION_STOP` 和 `stopService`，两条路都走。
+- 清单补 `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` / `WAKE_LOCK`，
+  service 声明 `foregroundServiceType="specialUse"` 并写了用途说明。
+
+真机证据（COM7 + `serial_bridge.py` + `adb reverse`，MuMu 横屏）：
+接管 → `dumpsys activity services` 里 `KeepAlive isForeground=true foregroundId=1001`、
+`dumpsys power` 里 `PARTIAL_WAKE_LOCK 'doppler:ctrl' ACQ`；**熄屏 60 s 亮屏仍是
+"接管中"**（145.79769 → 145.79802 MHz 照常走）；点「停止控频」→ 已交还、频率回
+145.80000，6 s 后服务记录 0、WAKE_LOCK 0。
+
+**没验到的两件**：① 真机 Doze / 国产 ROM 后台限制下是否真的不再断 —— 我做了 A/B
+（临时关掉 `KeepAlive.start` 重编，熄屏 32 s 同样活着），**结论是 MuMu 压根不进
+Doze，这条 A/B 无效**，仿真器上无法证伪；② 未授予 `POST_NOTIFICATIONS` 时通知的
+表现（服务应照跑，未实测）。
+
+### Look4Sat「网络输出」这条路：做到通，然后放弃
+
+`look4sat_bridge.py` 是能用的：假 rigctl 服务端收 `F <hz>`，翻成 `0x0768`+`0x076C`
+推给电台，PC 端假客户端实测接管/推帧/交还/保活全通。**但接管会立刻被固件收回去**，
+查出来的原因是：
+
+| 序列 | `0x0769` 回包 | 0.2 s 后 `0x076A` |
+|---|---|---|
+| 只发 `0x0768`=1 | `01` | `state 00`（已被收回） |
+| 先 `0x076E`=1 再 `0x0768`=1 | `11` | `state 15`（页\|表\|接管，稳） |
+
+固件 `Tick10ms` 里有一条"接管了却没开页"的防呆路径会把 `ext_ctrl` 收回去；App
+每次接管都带页，所以一直没暴露。桥已按这个顺序改好（`take()` 先发 `0x076E`）。
+
+即便如此，**在 MuMu 里把 Look4Sat 那个对话框点通仍然不稳**：`input tap` 的落点
+与截图偶发不一致（`uiautomator` 在这台 MuMu 上会 SIGSEGV），来回试还把它设置里的
+「罗盘偏移量（仰角）」拖到了 `-69°`。用户判定"不行就算了"，**这条路搁置**。
+桥保留在 `PC工具/多普勒工具/look4sat_bridge.py`，当独立工具用即可（不接 App）。
