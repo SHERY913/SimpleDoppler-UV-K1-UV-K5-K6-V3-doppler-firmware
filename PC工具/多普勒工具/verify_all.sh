@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# 一键回归：数据层 + 解算层 + 显示层
-#   bash 多普勒工具/verify_all.sh          # 三层全跑（显示层需要模拟器/真机连着）
-#   bash 多普勒工具/verify_all.sh --fast   # 跳过显示层
+# 一键回归：一致性 + 数据 + 解算 + 显示
+#   bash 多普勒工具/verify_all.sh          # 四层全跑（显示层需要模拟器/真机连着）
+#   bash 多普勒工具/verify_all.sh --fast   # 跳过显示层（只需 python，不需要设备）
+#
+# 顺序是有意的：一致性层最先跑，因为它不要编译器、不要设备、只要源码在，
+# 而它抓的正是本项目复发最多的那一类 bug（三端各自写一遍同一个约定）。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,26 +14,32 @@ export PYTHONIOENCODING=utf-8
 fail=0
 warn=0
 step() { printf '\n=== %s ===\n' "$1"; }
+tally() {  # rc: 0 通过 / 2 只有告警 / 其它 失败
+  case "$1" in
+    0) echo "→ OK" ;;
+    2) echo "→ 有告警（rc=2）"; warn=1 ;;
+    *) echo "→ 失败（rc=$1）"; fail=1 ;;
+  esac
+}
 
-step "1/3 数据层（TLE 台账 / 频率表 / 资产一致性）"
+step "1/4 一致性（固件 .h/.c ↔ PC doppler_core.py ↔ App PassCalc/RadioLink）"
+python 多普勒工具/verify_layout.py
+tally "$?"
+
+step "2/4 数据层（TLE 台账 / 频率表 / 资产一致性）"
 python 多普勒工具/verify_data.py | tail -18
-rc=${PIPESTATUS[0]}
-case "$rc" in
-  0) echo "→ OK" ;;
-  2) echo "→ 有告警（rc=2）"; warn=1 ;;
-  *) echo "→ 失败（rc=$rc）"; fail=1 ;;
-esac
+tally "${PIPESTATUS[0]}"
 
-step "2/3 解算层（Kotlin SGP4/SDP4 对 python-sgp4 真值）"
-bash 多普勒工具/verify_sgp4.sh 2>/dev/null | grep -v '^warning' | tail -8
-[ "${PIPESTATUS[0]}" = 0 ] && echo "→ OK" || { echo "→ 失败"; fail=1; }
+step "3/4 解算层（Kotlin SGP4/SDP4 对 python-sgp4 真值）"
+bash 多普勒工具/verify_sgp4.sh 2>/dev/null | grep -av '^warning' | tail -8
+tally "${PIPESTATUS[0]}"
 
 if [ "${1:-}" = "--fast" ]; then
-  step "3/3 显示层：跳过（--fast）"
+  step "4/4 显示层：跳过（--fast）"
 else
-  step "3/3 显示层（App 实算 vs Python 独立算）"
+  step "4/4 显示层（App 实算 vs Python 独立算，需模拟器 adb）"
   python 多普勒工具/verify_display.py | tail -6
-  [ "${PIPESTATUS[0]}" = 0 ] && echo "→ OK" || { echo "→ 失败"; fail=1; }
+  tally "${PIPESTATUS[0]}"
 fi
 
 printf '\n==================================\n'

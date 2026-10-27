@@ -4,6 +4,7 @@
 
 # 本机临时目录
 _tmp_gfw/
+PC工具/.gtmp/
 
 # PC 工具的本机状态与缓存
 #   doppler_tool.json 是操作员自己的经纬度/串口配置

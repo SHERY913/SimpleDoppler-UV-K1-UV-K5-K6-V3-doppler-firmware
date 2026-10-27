@@ -26,7 +26,7 @@ mkdir -p "$OUT"
 "$J" -cp "$(w "$KC");$(w "$ST");$(w "$TR");$(w "$SR");$(w "$CO");$(w "$AN")" \
   org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -nowarn \
   -cp "$(w "$ST")" -d "$(w "$OUT")" \
-  "$(w "$ROOT/android-app/app/src/main/java/com/f4hwn/doppler/orbit/Sgp4.kt")" \
+  "$(w "$ROOT/../安卓App/android-app/app/src/main/java/com/f4hwn/doppler/orbit/Sgp4.kt")" \
   "$(w "$ROOT/多普勒工具/CheckSgp4.kt")"
 
 cd "$ROOT/多普勒工具"

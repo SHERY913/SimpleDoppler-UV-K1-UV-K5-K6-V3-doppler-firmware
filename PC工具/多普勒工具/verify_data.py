@@ -25,10 +25,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-CACHE = ROOT / "多普勒工具" / "tle_cache.json"
-ASSETS = ROOT / "android-app" / "app" / "src" / "main" / "assets" / "tles.json"
-FREQS_KT = ROOT / "android-app" / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler" / "Freqs.kt"
+HERE = Path(__file__).resolve().parent          # PC工具/多普勒工具
+ROOT = HERE.parent.parent                       # 多普勒/
+APP = ROOT / "安卓App" / "android-app"
+CACHE = HERE / "tle_cache.json"
+ASSETS = APP / "app" / "src" / "main" / "assets" / "tles.json"
+FREQS_KT = APP / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler" / "Freqs.kt"
 
 # UV-K5/K1 的接收范围（MHz），超出就不可能收到
 RADIO_MIN_MHZ, RADIO_MAX_MHZ = 18.0, 1300.0
