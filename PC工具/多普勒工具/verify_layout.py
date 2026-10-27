@@ -35,6 +35,9 @@ F_PROBE = HERE / "probe_fw.py"
 F_PASS_KT = KT / "PassCalc.kt"
 F_LINK_KT = KT / "RadioLink.kt"
 F_SESS_KT = KT / "RadioSession.kt"
+F_MAIN_KT = KT / "MainScreen.kt"
+F_FAKE = HERE / "fakeradio.py"
+F_RADIO = HERE / "verify_radio.py"
 
 BAD: list[str] = []
 WARN: list[str] = []
@@ -124,6 +127,8 @@ def main() -> int:
     dop_h, dop_c, uart = read(F_DOP_H), read(F_DOP_C), read(F_UART)
     core, tool, probe = read(F_CORE), read(F_TOOL), read(F_PROBE)
     pass_kt, link_kt, sess_kt = read(F_PASS_KT), read(F_LINK_KT), read(F_SESS_KT)
+    main_kt = read(F_MAIN_KT)
+    fake_py, radio_py = read(F_FAKE), read(F_RADIO)
 
     # ── 1. 混淆掩码（同一张表在项目里有 4 份拷贝）──
     def hex_list(body: str) -> list[int] | None:
@@ -139,6 +144,10 @@ def main() -> int:
     masks["PC doppler_tool.py"] = hex_list(m.group(1)) if m else None
     m = re.search(r"^MASK = \[(.*?)\]", probe, re.S | re.M)
     masks["PC probe_fw.py"] = hex_list(m.group(1)) if m else None
+    #   假电台是这一张表的第 5 份拷贝。既然已经复制了，就必须一起钉住，
+    #   否则多出来的那份会悄悄变成"第 5 种说法"。
+    m = re.search(r"^MASK = \[(.*?)\]", fake_py, re.S | re.M)
+    masks["假电台 fakeradio.py"] = hex_list(m.group(1)) if m else None
     check("协议混淆掩码（应各 16 字节）", masks)
     for k, v in masks.items():
         if v is not None and len(v) != 16:
@@ -273,6 +282,37 @@ def main() -> int:
                     "写表那 35 秒里 App 无法告诉操作员'按了没反应'是正常现象")
     else:
         OK.append("固件报出的状态位 App 全部有解析")
+
+    # ── 7. 自动交还时长：全项目只能有一处真值 ──
+    #   这个数复发过：App 弹窗写"15 s"、固件留着 1500 tick 的死常量，而真正
+    #   生效的是 doppler.c 那句 `> 500u`（tick 是 10 ms，所以 5 s）。操作员
+    #   只会按屏幕上那个数去等，屏幕上说 15 秒、电台 5 秒就收回控制权，
+    #   等于让他多等 10 秒再发现这次过境已经废了。
+    def sec(txt: str, pat: str, unit: float = 1.0) -> float | None:
+        m = re.search(pat, txt)
+        return None if not m else round(float(m.group(1)) * unit, 2)
+
+    claims = {
+        "固件 silent 阈值": sec(dop_c, r"ext_ctrl_tick\)\s*>\s*(\d+)u?", 0.01),
+        "App 接管弹窗文案": sec(main_kt, r"断链\s*(\d+)\s*s"),
+        "App releaseControl 注释": sec(sess_kt, r"只认\s*(\d+)\s*秒内"),
+        "App 看门狗注释": sec(sess_kt, r"看门狗会在\s*(\d+)\s*秒后"),
+        #   同一个时长在项目里出现过第三种说法（1.2 s，是 5 Hz 推帧时代的老阈值），
+        #   代码改到 5 s 之后没人回头改注释 —— 这类漂移就是这条要抓的。
+        "App 推帧心跳注释": sec(sess_kt, r"(\d+(?:\.\d+)?)\s*秒不来固件就认为手机死"),
+        "假电台默认 watchdog": sec(fake_py, r"--watchdog-ms[^\n]*?default=([\d.]+)", 0.001),
+        "时序层全量模式": sec(radio_py, r"if a\.quick else ([\d.]+)", 0.001),
+    }
+    check("断链后自动交还时长（秒）", claims)
+
+    #   死常量单独判红：它不参与判断，只负责让下一个改代码的人抄错。
+    hits = [ln.strip() for ln in dop_c.splitlines() if "DPH_EXT_TIMEOUT_TICKS" in ln]
+    code = [ln for ln in hits if not ln.startswith(("*", "//", "/*"))]
+    if code and all(ln.startswith("#define") for ln in code):
+        BAD.append(f"固件死常量 DPH_EXT_TIMEOUT_TICKS 还留着（{code[0]}），"
+                   f"用它那个分支已经删掉了 —— 注释和常量都在说 15 s，代码是 5 s")
+    elif code:
+        OK.append(f"DPH_EXT_TIMEOUT_TICKS 仍被 {len(code)} 处代码引用")
 
     # ── 输出 ──
     for line in OK:
