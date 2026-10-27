@@ -5,12 +5,13 @@ APK 和 bin 都是可再生产物，`.gitignore` 故意把它们排除在库外�
 
 | 文件 | 大小 | md5 | 构建自 |
 |---|---|---|---|
-| `多普勒App-debug.apk` | 15,798,235 | `81a876962914b21afb259ed5db9ac681` | `安卓App` `747bb9f`（`versionName 0.6` / `versionCode 6`），clean 构建 |
+| `多普勒App-debug.apk` | 15,798,887 | `f52847047dd49327af2aa9f082cebd23` | `安卓App` `f5ab38c`（`versionName 0.7` / `versionCode 7`），clean 构建 |
 | `f4hwn.sstv.doppler.bin` | 101,604 | `586f8cbccab408a359a0cac0a3dddc59` | `固件源码/uvk1-v6.3.0` `819a3ad`（含 `0x0770` 读回 VFO + 断帧斜率外推 + 前面六处） |
 | `F4HWN-Doppler.apk` | 15,670,767 | `68c2c1bd7d63b12dffabed58a70c4fab` | 2026-10-25 15:25 改名前的旧发布包，**不等于当前源码**，仅留作追溯 |
 
-上一版 App 包（`75610cbf9b734928ceaabe978a0a3adf` / 15,793,359 B，0.5，构建自 `7f30d46`）
-已移到 `历史-20261027/多普勒App-debug-20261027-2219.apk`。
+上一版 App 包（`81a876962914b21afb259ed5db9ac681` / 15,798,235 B，0.6，构建自 `747bb9f`）
+已移到 `历史-20261027/多普勒App-debug-20261027-2229.apk`；0.5（`75610cbf…` / 15,793,359 B）
+在 `历史-20261027/多普勒App-debug-20261027-2219.apk`。
 
 上一版 App 包（`430c3c9030240fe65d6e6061c5dc59eb` / 16,027,972 B，构建自 `bd2635d`）
 已移到 `历史-20261027/多普勒App-debug-20261027-1942.apk`（时间戳标的是归档时刻，
@@ -263,3 +264,32 @@ Doze，这条 A/B 无效**，仿真器上无法证伪；② 未授予 `POST_NOTI
 「已写入 16 趟 / 36576 B / 9 扇区 / 25.4 s」。
 **没验到**：真机崩溃是否真消失（拿不到日志）、真机 USB 连不上到底是线/供电/授权。
 **没做**：表升 v6 把 AOS 提到 1 秒精度（要 App + 固件一起换格式）。
+
+### App 0.7（`f5ab38c`，15,798,887 / `f5284704…`）：追踪页崩溃的真凶
+
+用户给了实机栈（V1936A / Android 11）：
+
+```
+java.lang.IllegalStateException: Offset is unspecified
+  at Offset.getX-impl
+  at AndroidCanvas.drawLine
+  at SkyViewKt.SkyView$lambda$15$lambda$14(SkyView.kt:175)   ← 卫星方位那条红短线
+```
+
+**不是数据错，是渲染崩**：SkyView 拿 `satAz` 算 `Offset` 再 `drawLine`，而 SGP4 在
+偏心轨道退化 / TLE 外推太远时会算出 NaN，Compose 在绘制阶段就抛异常。所以仿真器
+（数据全正常）复现不出来，只在真机某些星上炸。
+
+两头都堵：
+
+- 源头 `MainScreen` 的定位 tick：方位/仰角/距离/距离变化率任一非有限，就不更新
+  `live`，改标 `ok=false` + "轨道解算失败（TLE 外推太远？）"。
+- 绘制 `SkyView`：入口先 `isFinite` 兜底全部入参、`R<=0` 直接 `return@Canvas`、
+  过境轨迹逐点跳过非有限值。**即便还有 NaN，也只是画得不对，不会再崩。**
+
+同时撤掉 0.6 那个强制横屏（用户问"为啥 APP 是横屏"）：不锁方向，竖屏下详情页的
+"收 x / 发 y" 改可压缩权重 + 最多两行右对齐，不再被挤出屏幕右缘。竖屏 1080x1920
+逐页实拍验证：列表 / 详情 / 追踪均正常。
+
+**没验到**：那台真机的 NaN 场景本身无法复现（拿不到机器），这版是"两头都堵住"，
+不是"复现后修好"。
