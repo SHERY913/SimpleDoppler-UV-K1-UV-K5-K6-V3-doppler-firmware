@@ -1,0 +1,14 @@
+# 行尾策略。这台机器 core.autocrlf=true，不设这个文件的话任何 git checkout
+# 都会把 .sh 变成 CRLF，Git Bash 里直接跑不起来（"$'\r': command not found"）。
+# 起因：2026-10-27 一次 git checkout 把 doppler_core.py 改成 CRLF，
+# 与另一份副本对比时看起来像代码分叉，白白追了一次假问题。
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.bin binary
+*.apk binary
+*.wav binary
+*.png binary
+*.ttf binary
