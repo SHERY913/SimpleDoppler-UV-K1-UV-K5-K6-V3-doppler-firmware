@@ -17,9 +17,10 @@ import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(HERE)                      # 多普勒/PC工具
+REPO = os.path.dirname(ROOT)                      # 多普勒
 CACHE = os.path.join(HERE, "tle_cache.json")
-ASSETS = os.path.join(ROOT, "android-app", "app", "src", "main", "assets", "tles.json")
+ASSETS = os.path.join(REPO, "安卓App", "android-app", "app", "src", "main", "assets", "tles.json")
 
 SRC = "https://www.amsat.org/tle/current/nasabare.txt"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -29,6 +30,23 @@ def fetch(url=SRC, timeout=25):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "replace")
+
+
+def fetch_any(url=SRC, timeout=25):
+    """先 urllib，再退回 curl。urllib 在这台机器上会卡在 TLS 握手（实测 25 s 超时，
+    同一时刻 curl 一秒拿到 14 KB），所以必须留一条后路，否则"刷新 TLE"永远是
+    "下载失败，保留旧缓存"，数据只会越来越旧。curl 是 Windows 10+ 自带的。"""
+    try:
+        return fetch(url, timeout)
+    except Exception as e:  # noqa: BLE001
+        print(f"urllib 取不到（{e}），改试 curl …")
+    import subprocess
+    out = subprocess.run(["curl", "-sS", "-m", str(timeout), "-A", UA, url],
+                         capture_output=True, timeout=timeout + 15)
+    if out.returncode != 0 or len(out.stdout) < 4096:
+        raise RuntimeError(f"curl 也失败 rc={out.returncode} "
+                           f"{out.stderr.decode('utf-8', 'replace')[:200]}")
+    return out.stdout.decode("utf-8", "replace")
 
 
 def _f(s, default=0.0):
@@ -124,6 +142,7 @@ def validate(tles):
 
 def main():
     check = "--check" in sys.argv
+    resync = "--resync" in sys.argv
 
     if os.path.exists(CACHE):
         try:
@@ -135,8 +154,22 @@ def main():
     if check:
         return 0
 
+    if resync:
+        # 只把缓存搬一份进 assets，不联网。用途：assets 落后于缓存时
+        # （上次刷新被 Ctrl-C、或者别人手工改过 assets），verify_data 会一直报
+        # "两侧 TLE 内容不一致"，而真正的修法不是再下一次数据，是把它同步过去。
+        if not os.path.exists(CACHE):
+            print("没有缓存，先跑一次不带参数的 refresh_tle.py")
+            return 1
+        tles = json.load(open(CACHE, encoding="utf-8"))
+        os.makedirs(os.path.dirname(ASSETS), exist_ok=True)
+        slim = {k: v[:3] for k, v in tles.items()}
+        json.dump(slim, open(ASSETS, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print(f"已把 {len(slim)} 颗从缓存同步进 {ASSETS}（没有联网）")
+        return 0
+
     try:
-        text = fetch()
+        text = fetch_any()
     except Exception as e:
         print("下载失败，保留旧缓存:", e)
         return 1
