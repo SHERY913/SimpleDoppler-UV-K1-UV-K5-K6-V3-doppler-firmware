@@ -20,3 +20,6 @@ __pycache__/
 verify/*.png
 # reverse/ 里的分析脚本要留，只有被逆向的原始 APK 不进库
 reverse/look4sat.apk
+
+# 我自己调试时 dump 的界面树，不是项目产物
+_ui_dump.txt
