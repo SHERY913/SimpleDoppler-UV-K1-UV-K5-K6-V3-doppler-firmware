@@ -314,6 +314,36 @@ def main() -> int:
     elif code:
         OK.append(f"DPH_EXT_TIMEOUT_TICKS 仍被 {len(code)} 处代码引用")
 
+    # ── 8. 多普勒补偿的符号（上下行必须反号）──
+    #   这类错误编译通过、跑起来也"看着在动"，只有对着一份权威实现比符号才看得出来。
+    #   起因：在线推帧的上行曾写成 upHz + upDopp（与下行的 + 号同形），而固件自己那套
+    #   是 up10 - 补偿、离线表存的是标称值 —— 只有在线这一条路反了，145.99 MHz 上
+    #   AOS/LOS 两端差到 7 kHz，FM 静噪开不了，现象是"手机控频一发就没人应"。
+    def sign(txt: str, pat: str) -> str | None:
+        m = re.search(pat, txt)
+        return None if not m else m.group(1)
+
+    kt_rx = sign(main_kt, r"rxHz\s*([+-])\s*dop\b")
+    kt_tx = sign(main_kt, r"upHz\s*([+-])\s*upDopp")
+    fw_tx = None
+    #   只切定义那一处：文件开头还有个前向声明，从它切就什么都切不到。
+    m = re.search(r"static uint32_t DPH_Tx10WithOff\(int32_t off_hz\)\s*\{(.*?)\n\}",
+                  dop_c, re.S)
+    if m:
+        g = re.search(r"up10\s*([+-])", m.group(1))
+        fw_tx = g.group(1) if g else None
+    if kt_rx is None or kt_tx is None or fw_tx is None:
+        BAD.append(f"符号检查解析失效：App 下行 {kt_rx} / App 上行 {kt_tx} / 固件上行 {fw_tx}"
+                   f" —— 有一端没匹配到，本检查不可信")
+    else:
+        if kt_rx != "+":
+            BAD.append(f"App 下行补偿符号应为 +（rxHz + dop），实得 rxHz {kt_rx} dop")
+        if kt_tx != fw_tx:
+            BAD.append(f"App 在线推帧的上行是 upHz {kt_tx} upDopp，固件是 up10 {fw_tx} 补偿 "
+                       f"—— 两端反号，电台会朝错误的频点发射")
+        if kt_rx == "+" and kt_tx == fw_tx:
+            OK.append(f"多普勒补偿符号：App 下行 {kt_rx} / App 上行 {kt_tx} = 固件上行 {fw_tx}")
+
     # ── 输出 ──
     for line in OK:
         print(f"  ✓ {line}")
