@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Doppler 排版器 · 128×64</title>
+<style>
+  :root { --ink:#1a2418; --paper:#a8c292; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:13px/1.5 "Segoe UI",system-ui,sans-serif; background:#1b1d1f; color:#d8dcd8; }
+  header { padding:10px 14px; background:#242729; display:flex; gap:8px; align-items:center; border-bottom:1px solid #333; }
+  header h1 { font-size:14px; margin:0 14px 0 0; font-weight:600; color:#9fd08a; }
+  button { background:#2f3437; color:#d8dcd8; border:1px solid #3d4448; padding:5px 11px; border-radius:4px; cursor:pointer; font-size:12px; }
+  button:hover { background:#3a4044; }
+  button.on { background:#3f7a35; border-color:#4d9440; color:#fff; }
+  main { display:flex; gap:16px; padding:16px; align-items:flex-start; }
+  #wrap { position:relative; }
+  canvas { display:block; image-rendering:pixelated; border:1px solid #3d4448; border-radius:3px; cursor:crosshair; }
+  #side { width:330px; display:flex; flex-direction:column; gap:10px; }
+  #tabs { display:flex; gap:6px; }
+  #tabs button { flex:1; padding:6px 0; }
+  #list { background:#242729; border:1px solid #333; border-radius:4px; max-height:300px; overflow:auto; }
+  .row { display:flex; gap:6px; align-items:center; padding:5px 8px; border-bottom:1px solid #2c2f31; cursor:pointer; }
+  .row:last-child { border-bottom:none; }
+  .row.sel { background:#31443a; }
+  .row .tag { font-size:10px; padding:1px 5px; border-radius:3px; background:#3d4448; color:#a9b2ad; min-width:38px; text-align:center; }
+  .row .txt { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:Consolas,monospace; }
+  .row .xy { font-size:11px; color:#7d8a80; font-variant-numeric:tabular-nums; }
+  #props { background:#242729; border:1px solid #333; border-radius:4px; padding:10px; display:grid; gap:8px; }
+  #props label { display:grid; grid-template-columns:58px 1fr; gap:8px; align-items:center; font-size:12px; color:#9aa79e; }
+  input,select { background:#1b1d1f; color:#d8dcd8; border:1px solid #3d4448; border-radius:3px; padding:4px 6px; font-size:12px; width:100%; font-family:Consolas,monospace; }
+  .hint { font-size:11px; color:#7d8a80; line-height:1.6; }
+  .hint code { color:#9fd08a; font-size:11px; }
+  .btns { display:flex; gap:6px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Doppler 排版器</h1>
+  <span class="hint">拖拽移动 · 方向键微调 · Del 删除 ｜ RUN 页也是第二套逻辑（手机推数据）用的那页</span>
+  <span style="flex:1"></span>
+  <button onclick="addItem()">+ 加文字</button>
+  <button onclick="delItem()">− 删除选中</button>
+  <button onclick="exportC()">导出 C 代码</button>
+  <button onclick="exportJSON()">存 JSON</button>
+  <button onclick="document.getElementById('file').click()">读 JSON</button>
+  <input type="file" id="file" style="display:none" accept=".json" onchange="importJSON(this)">
+</header>
+
+<main>
+  <div id="wrap"><canvas id="cv" width="768" height="384"></canvas></div>
+
+  <div id="side">
+    <div id="tabs"></div>
+    <div id="list"></div>
+    <div id="props">
+      <label>文字 <input id="p_text" oninput="upd('text',this.value)"></label>
+      <label>字体 <select id="p_font" onchange="upd('font',this.value)">
+        <option value="tiny">3×5 超小</option>
+        <option value="small">6×7 小字</option>
+        <option value="bold">6×7 粗体</option>
+        <option value="big">7×16 大字</option>
+        <option value="bar">进度条</option>
+      </select></label>
+      <label>X <input id="p_x" type="number" min="0" max="127" oninput="upd('x',+this.value)"></label>
+      <label>Y <input id="p_y" type="number" min="0" max="47" oninput="upd('y',+this.value)"></label>
+      <label>对齐 <select id="p_align" onchange="upd('align',this.value)">
+        <option value="left">左对齐（X 是起点）</option>
+        <option value="center">居中</option>
+        <option value="right">右对齐（X 是终点）</option>
+      </select></label>
+    </div>
+    <div class="hint">
+      占位符，画的时候自动换成真实值：<br>
+      <code>$F</code> 频率 &nbsp; <code>$E</code> 仰角 &nbsp; <code>$D</code> dBm &nbsp; <code>$O</code> 偏移<br>
+      <code>$P</code> 百分比 &nbsp; <code>$L</code> 剩余时间 &nbsp; <code>$U</code> 已用时间<br>
+      <code>$S</code> 卫星名 &nbsp; <code>$N</code> 序号 &nbsp; <code>$T</code> 总数 &nbsp; <code>$M</code> 最大仰角<br>
+      <code>$A</code> AOS 时间 &nbsp; <code>$W</code> 频偏跨度<br>
+      <code>$Y</code> 上行频率 &nbsp; <code>$Z</code> 亚音 &nbsp; <code>$G</code> 斜距 km &nbsp; <code>$H</code> 径向速度 &nbsp; <code>$B</code> 日期 MM-DD<br>
+      <code>$C</code> 时钟 &nbsp; <code>$K</code> 校准计时 &nbsp; <code>$X</code> 校准系数 &nbsp;
+      <code>$R</code> 距 AOS 秒 &nbsp; <code>$I</code> 输入区 &nbsp; <code>$Q</code> 功率 &nbsp; <code>$J</code> APP 角标
+    </div>
+    <div class="btns">
+      <button onclick="loadDefault()">恢复默认布局</button>
+    </div>
+  </div>
+</main>
+
+<script src="fonts_data.js"></script>
+<script>
+const W=128, H=64, Z=6;
+const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE'];
+const SAMPLE={ $F:'145.7976', $E:'42', $D:'-87', $O:'-2360', $P:'60', $L:'-04:12',
+               $U:'06:18', $N:'1', $T:'17', $M:'68', $A:'10:20', $W:'6.5K',
+               $S:'RS-44 & BR', $C:'22:41:07', $K:'12:34', $X:'1.0062',
+               $R:'04:12', $I:'------', $Q:'5W', $Y:'145.98900', $Z:'T67.0', $J:'APP',
+               $G:'475', $H:'-0.8', $B:'10-26' };
+
+let model = null, page = 0, sel = 0, drag = null;
+
+/* ---------- glyph lookup ------------------------------------------- */
+function tinyGlyph(ch){ const c=ch.charCodeAt(0)-32; return (c>=0&&c<96)?TINY[c]:[0,0,0]; }
+function smallGlyph(ch){
+  if(ch===' ') return null;
+  const g=ch.charCodeAt(0)-33;
+  if(g<0||g>=94) return null;
+  const b=g*42, out=[];
+  for(let r=0;r<7;r++){ const row=[]; for(let c=0;c<6;c++) row.push((SMALL[(b+c*7+r)>>3]>>((b+c*7+r)&7))&1); out.push(row); }
+  return out;
+}
+function bigGlyph(ch){
+  if(ch===' ') return null;
+  const g=ch.charCodeAt(0)-33;
+  if(g<0||g>=94) return null;
+  const e=BIGP.slice(g*8,g*8+8), top=new Array(7).fill(0), bot=new Array(7).fill(0);
+  let l=e[7];
+  for(let i=0;i<14;i++){
+    let code=(e[i>>1]>>((i&1)*4))&0xF, v;
+    if(code===0xF) v=LIT[l++]||0; else v=DICT[(i>=7?15:0)+code];
+    if(i<7) top[i]=v; else bot[i-7]=v;
+  }
+  return [top,bot];
+}
+
+/* ---------- measuring ---------------------------------------------- */
+function step(font){ return font==='tiny'?4 : font==='big'?13 : font==='bar'?88 : 7; }
+function textOf(it){ return it.text.replace(/\$./g, m=> SAMPLE[m] || m); }
+function widthOf(it){ return textOf(it).length * step(it.font); }
+function startX(it){
+  const w=widthOf(it);
+  if(it.align==='right')  return it.x - w;
+  if(it.align==='center') return Math.round((W-w)/2);
+  return it.x;
+}
+
+/* ---------- drawing ------------------------------------------------- */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const px=[]; for(let y=0;y<H;y++) px.push(new Array(W).fill(0));
+
+function plot(x,y){ if(x>=0&&x<W&&y>=0&&y<H) px[y][x]=1; }
+
+function drawTiny(s,x,y){ for(const ch of s){ const g=tinyGlyph(ch);
+  for(let i=0;i<3;i++) for(let j=0;j<6;j++) if((g[i]>>j)&1) plot(x+i,y+j); x+=4; } }
+
+function drawSmall(s,x,y,bold){ for(const ch of s){ const g=smallGlyph(ch);
+  if(g) for(let r=0;r<7;r++) for(let c=0;c<6;c++) if(g[r][c]){ plot(x+c,y+r); if(bold) plot(x+c+1,y+r); }
+  x+=7; } }
+
+function drawBig(s,line){
+  const y=8+line*8, w=s.length*13, x0=Math.round((W-w)/2);
+  let x=x0;
+  for(const ch of s){ const g=bigGlyph(ch);
+    if(g) for(let c=0;c<7;c++){
+      for(let k=0;k<8;k++){ if((g[0][c]>>k)&1) plot(x+c,y+k); if((g[1][c]>>k)&1) plot(x+c,y+8+k); }
+    }
+    x+=13; }
+}
+
+function drawBar(x0,y,pct){
+  const x1=x0+88;
+  for(let x=x0;x<=x1;x++){ plot(x,y); plot(x,y+6); }
+  for(let yy=y;yy<=y+6;yy++){ plot(x0,yy); plot(x1,yy); }
+  const w=Math.round(86*pct/100);
+  for(let x=x0+1;x<x0+1+w;x++) for(let yy=y+1;yy<y+6;yy++) plot(x,yy);
+}
+
+function render(){
+  px.forEach(r=>r.fill(0));
+  for(let x=2;x<W-2;x++) px[3][x]=1;
+
+  for(const it of model[page]){
+    const t=textOf(it);
+    if(it.font==='bar'){ drawBar(it.x, it.y+8, 60); continue; }
+    const sy = it.y + 8;
+    if(it.font==='big') drawBig(t, it.y);
+    else if(it.font==='tiny') drawTiny(t, startX(it), sy);
+    else if(it.font==='small') drawSmall(t, startX(it), sy, false);
+    else drawSmall(t, startX(it), sy, true);
+  }
+
+  ctx.fillStyle='#a8c292'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#1a2418';
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(px[y][x]) ctx.fillRect(x*Z,y*Z,Z,Z);
+
+  // selection box
+  const it=model[page][sel];
+  if(it){
+    let bx,by,bw,bh;
+    if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
+    else if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
+    else if(it.font==='big'){ bw=textOf(it).length*13; bx=Math.round((W-bw)/2); by=8+it.y*8; bh=16; }
+    else { bw=widthOf(it); bx=startX(it); by=it.y+8; bh=it.font==='tiny'?6:7; }
+    ctx.strokeStyle= sel===undefined?'#000':'#ff5d3a'; ctx.lineWidth=1;
+    ctx.strokeRect(bx*Z-0.5, by*Z-0.5, bw*Z+1, bh*Z+1);
+  }
+}
+
+/* ---------- ui ------------------------------------------------------ */
+function buildTabs(){
+  const d=document.getElementById('tabs'); d.innerHTML='';
+  PAGES.forEach((n,i)=>{ const b=document.createElement('button');
+    b.textContent=n; if(i===page) b.className='on';
+    b.onclick=()=>{ page=i; sel=0; refresh(); }; d.appendChild(b); });
+}
+
+function buildList(){
+  const d=document.getElementById('list'); d.innerHTML='';
+  model[page].forEach((it,i)=>{
+    const r=document.createElement('div');
+    r.className='row'+(i===sel?' sel':'');
+    r.innerHTML=`<span class="tag">${it.font}</span><span class="txt">${it.text}</span>
+                 <span class="xy">${it.x},${it.y}</span>`;
+    r.onclick=()=>{ sel=i; refresh(); };
+    d.appendChild(r);
+  });
+}
+
+function buildProps(){
+  const it=model[page][sel];
+  const on=!!it;
+  ['p_text','p_font','p_x','p_y','p_align'].forEach(id=>document.getElementById(id).disabled=!on);
+  if(!on) return;
+  document.getElementById('p_text').value=it.text;
+  document.getElementById('p_font').value=it.font;
+  document.getElementById('p_x').value=it.x;
+  document.getElementById('p_y').value=it.y;
+  document.getElementById('p_align').value=it.align;
+}
+
+function refresh(){ buildTabs(); buildList(); buildProps(); render(); }
+
+function upd(k,v){
+  const it=model[page][sel]; if(!it) return;
+  it[k]=v; buildList(); render();
+}
+
+function addItem(){
+  model[page].push({text:'NEW', font:'tiny', x:2, y:8, align:'left'});
+  sel=model[page].length-1; refresh();
+}
+
+/* ---------- drag ---------------------------------------------------- */
+cv.onmousedown=e=>{
+  const r=cv.getBoundingClientRect();
+  const mx=(e.clientX-r.left)/Z, my=(e.clientY-r.top)/Z;
+  let hit=-1;
+  model[page].forEach((it,i)=>{
+    let bx,by,bw,bh;
+    if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
+    else if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
+    else if(it.font==='big'){ bw=textOf(it).length*13; bx=Math.round((W-bw)/2); by=8+it.y*8; bh=16; }
+    else { bw=widthOf(it); bx=startX(it); by=it.y+8; bh=it.font==='tiny'?6:7; }
+    if(mx>=bx-1&&mx<=bx+bw+1&&my>=by-1&&my<=by+bh+1) hit=i;
+  });
+  if(hit>=0){ sel=hit; refresh(); const it=model[page][sel];
+    drag={dx:mx-it.x, dy:my-(it.y+(it.font==='big'?8:8))}; }
+};
+
+window.onmousemove=e=>{
+  if(!drag) return;
+  const r=cv.getBoundingClientRect();
+  const mx=(e.clientX-r.left)/Z, my=(e.clientY-r.top)/Z;
+  const it=model[page][sel]; if(!it) return;
+  it.x=Math.max(0,Math.min(127,Math.round(mx-drag.dx)));
+  it.y=Math.max(0,Math.min(it.font==='big'?5:47,Math.round(my-drag.dy)));
+  buildList(); buildProps(); render();
+};
+
+window.onmouseup=()=>drag=null;
+
+function delItem(){
+  if(!model[page][sel]){ alert('先在左边列表里点中要删的那一行'); return; }
+  model[page].splice(sel,1);
+  sel=Math.max(0,sel-1);
+  refresh();
+}
+
+window.onkeydown=e=>{
+  const t=e.target;
+  if(t && (t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA')) return;
+  const it=model[page][sel]; if(!it) return;
+  if(e.key==='Delete'){ delItem(); return; }
+  const map={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+  if(map[e.key]){ e.preventDefault();
+    it.x=Math.max(0,Math.min(127,it.x+map[e.key][0]));
+    it.y=Math.max(0,Math.min(it.font==='big'?5:55,it.y+map[e.key][1]));
+    buildList(); buildProps(); render(); }
+};
+
+/* ---------- import / export ---------------------------------------- */
+function exportJSON(){
+  const b=new Blob([JSON.stringify(model,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+  a.download='doppler_layout.json'; a.click();
+}
+
+function importJSON(inp){
+  const f=inp.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ model=JSON.parse(r.result); page=0; sel=0; refresh(); }
+                 catch(err){ alert('读不了：'+err); } };
+  r.readAsText(f);
+}
+
+function exportC(){
+  let out='/* generated by layout_editor.html */\n';
+  out+='static const dph_item_t dph_layout[] =\n{\n';
+  PAGES.forEach((name,p)=>{
+    out+=`    /* ${name} */\n`;
+    model[p].forEach(it=>{
+      const f={tiny:0,small:1,bold:2,big:3,bar:4}[it.font];
+      const a={left:0,center:1,right:2}[it.align];
+      out+=`    { ${p}, ${f}, ${a}, ${it.x}, ${it.y}, "${it.text}" },\n`;
+    });
+  });
+  out+='};\n';
+  out+='\n';  out+='#define DPH_ITEM_COUNT ((uint8_t)(sizeof(dph_layout) / sizeof(dph_layout[0])))\n';
+  const b=new Blob([out],{type:'text/plain'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+  a.download='doppler_layout.h'; a.click();
+  navigator.clipboard?.writeText(out);
+}
+
+/* ---------- default ------------------------------------------------- */
+function defaultModel(){
+  return [
+    /* 0 */
+    [
+      {text: '$S', font: 'tiny', x: 6, y: 0, align: 'left'},
+      {text: '$N/$T', font: 'tiny', x: 126, y: 0, align: 'right'},
+      {text: 'TX $Y', font: 'tiny', x: 3, y: 21, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 76, y: 21, align: 'right'},
+      {text: 'EL $M', font: 'tiny', x: 2, y: 32, align: 'left'},
+      {text: 'DUR $U', font: 'tiny', x: 90, y: 40, align: 'left'},
+      {text: '$C', font: 'tiny', x: 104, y: 0, align: 'right'},
+      {text: 'M  START', font: 'tiny', x: 2, y: 49, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+      {text: '$R', font: 'tiny', x: 97, y: 12, align: 'left'},
+      {text: 'AOS $B $A', font: 'tiny', x: 66, y: 32, align: 'left'},
+      {text: 'SW $W', font: 'tiny', x: 2, y: 40, align: 'left'},
+      {text: 'RX $F', font: 'bold', x: 3, y: 11, align: 'left'},
+    ],
+    /* 1 */
+    [
+      {text: 'RX $F', font: 'bold', x: 7, y: 1, align: 'left'},
+      {text: 'TX $Y', font: 'tiny', x: 7, y: 12, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 89, y: 12, align: 'right'},
+      {text: '', font: 'bar', x: 6, y: 45, align: 'left'},
+      {text: 'EL $E', font: 'tiny', x: 7, y: 22, align: 'left'},
+      {text: '$P%', font: 'tiny', x: 111, y: 46, align: 'right'},
+      {text: '$G km', font: 'tiny', x: 7, y: 30, align: 'left'},
+      {text: '$L', font: 'tiny', x: 118, y: 2, align: 'right'},
+      {text: '$Q', font: 'tiny', x: 103, y: 12, align: 'left'},
+      {text: '$C', font: 'tiny', x: 95, y: 38, align: 'right'},
+      {text: '$H km/s', font: 'tiny', x: 6, y: 37, align: 'left'},
+      {text: '$D', font: 'bold', x: 73, y: 25, align: 'left'},
+      {text: 'dB', font: 'bold', x: 103, y: 25, align: 'left'},
+      {text: '$J', font: 'tiny', x: 127, y: 32, align: 'right'},
+    ],
+    /* 2 */
+    [
+      {text: 'PASS COMPLETE', font: 'bold', x: 8, y: 0, align: 'left'},
+      {text: 'DUR $U', font: 'tiny', x: 15, y: 30, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 44, align: 'right'},
+      {text: '73!', font: 'bold', x: 76, y: 29, align: 'left'},
+      {text: '$S', font: 'bold', x: 15, y: 11, align: 'left'},
+      {text: 'SW $W', font: 'tiny', x: 15, y: 38, align: 'left'},
+      {text: 'MAX EL:$M', font: 'tiny', x: 15, y: 22, align: 'left'},
+    ],
+    /* 3 */
+    [
+      {text: 'NO DATA', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 44, align: 'right'},
+    ],
+    /* 4 */
+    [
+      {text: 'SET CLOCK', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: '$C', font: 'big', x: 0, y: 1, align: 'center'},
+      {text: '$I', font: 'tiny', x: 0, y: 30, align: 'center'},
+      {text: 'TYPE MMDDHHMMSS', font: 'tiny', x: 2, y: 38, align: 'left'},
+      {text: 'MENU OK', font: 'tiny', x: 2, y: 46, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
+    ],
+    /* 5 */
+    [
+      {text: 'CALIBRATE', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: '1 PRESS M START', font: 'tiny', x: 2, y: 9, align: 'left'},
+      {text: '2 WAIT 10-30 MIN', font: 'tiny', x: 2, y: 17, align: 'left'},
+      {text: '3 TYPE HHMMSS', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: '4 PRESS MENU', font: 'tiny', x: 2, y: 33, align: 'left'},
+      {text: 'EL $K   REAL $I', font: 'tiny', x: 2, y: 41, align: 'left'},
+      {text: 'CAL $X', font: 'tiny', x: 2, y: 49, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+    ],
+  ];
+}
+
+function loadDefault(){ if(confirm('恢复默认布局？当前改动会丢')){ model=defaultModel(); sel=0; refresh(); } }
+
+model=defaultModel();
+refresh();
+</script>
+</body>
+</html>

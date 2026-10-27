@@ -1,0 +1,21 @@
+# 固件与安卓各自是独立仓库，不在这个仓库里当 gitlink
+固件源码/
+安卓App/
+
+# 本机临时目录
+_tmp_gfw/
+
+# PC 工具的本机状态与缓存
+#   doppler_tool.json 是操作员自己的经纬度/串口配置
+#   tle_cache.json 每次联网刷新都会变，属于缓存不是数据
+PC工具/多普勒工具/doppler_tool.json
+PC工具/多普勒工具/tle_cache.json
+#   但 _sdp4_truth.* 是 SGP4 比对的基准真值表，必须进库
+__pycache__/
+.DS_Store
+
+# 可由源码重新产出的大件，不进库（小的 .bin 烧写件仍然进库，见下）
+交付/*.apk
+verify/*.png
+# reverse/ 里的分析脚本要留，只有被逆向的原始 APK 不进库
+reverse/look4sat.apk
