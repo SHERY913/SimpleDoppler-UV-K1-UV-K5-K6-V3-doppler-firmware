@@ -16,7 +16,7 @@ __pycache__/
 .DS_Store
 
 # 可由源码重新产出的大件，不进库（小的 .bin 烧写件仍然进库，见下）
-交付/*.apk
+交付/**/*.apk
 verify/*.png
 # reverse/ 里的分析脚本要留，只有被逆向的原始 APK 不进库
 reverse/look4sat.apk
