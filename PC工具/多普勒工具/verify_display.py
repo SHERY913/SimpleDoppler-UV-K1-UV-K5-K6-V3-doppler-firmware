@@ -153,6 +153,15 @@ def main() -> int:
 
     tles = json.loads(CACHE.read_text(encoding="utf-8"))
 
+    # App 的台站原点现在从 prefs 读（以前是 MainScreen.kt 里写死的一行）。
+    # 自检用同一个后门 doppler_station 把原点喂进去，两边才算的是同一个台站；
+    # 而 station 是在组合时读一次的，所以必须重开 App 才生效。
+    adb("shell", "settings", "put", "global", "doppler_station",
+        f"{args.lat},{args.lon},{args.alt}")
+    adb("shell", "am", "force-stop", "com.f4hwn.doppler")
+    adb("shell", "monkey", "-p", "com.f4hwn.doppler",
+        "-c", "android.intent.category.LAUNCHER", "1")
+    time.sleep(4)
     adb("shell", "settings", "put", "global", "doppler_dump", "1")
     adb("logcat", "-c")
     try:
@@ -215,6 +224,7 @@ def main() -> int:
     finally:
         if not args.keep:
             adb("shell", "settings", "delete", "global", "doppler_dump")
+            adb("shell", "settings", "delete", "global", "doppler_station")
 
 
 if __name__ == "__main__":

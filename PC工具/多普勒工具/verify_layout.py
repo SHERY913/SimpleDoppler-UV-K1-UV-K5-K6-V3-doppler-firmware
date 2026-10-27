@@ -344,6 +344,24 @@ def main() -> int:
         if kt_rx == "+" and kt_tx == fw_tx:
             OK.append(f"多普勒补偿符号：App 下行 {kt_rx} / App 上行 {kt_tx} = 固件上行 {fw_tx}")
 
+    # ── 9. 台站原点：只能有一个来源，而且必须是用户设的 ──
+    #   43.83/87.62 是乌鲁木齐的坐标，当年直接写在 MainScreen.kt 的一行 remember 里，
+    #   界面上没有任何入口能改：别人装上这个 App，过境时刻、仰角、斜距、多普勒样点
+    #   全按乌鲁木齐算，还会把这张错表写进电台外部 flash，而界面一路报「成功」。
+    hard = re.findall(r"Station\s*\(\s*\d+", main_kt)
+    if hard:
+        BAD.append("App 里又出现了硬编码台站坐标：" + ", ".join(hard) +
+                   " —— 原点必须走 Geo.StationStore.load()，未设时挡住写表与控频")
+    elif "StationStore.load(ctx)" not in main_kt:
+        BAD.append("App 没有从 Geo.StationStore 读台站（MainScreen.kt 里找不到 load(ctx)）")
+    else:
+        un = [k for k in ("writeTable", "liveTune") if k in main_kt]
+        gated = "Geo.StationStore.isUnset(station)" in main_kt
+        OK.append(f"台站原点单一来源（Geo.StationStore）；未设时的闸门：{'有' if gated else '没有'}"
+                  f"（挡在 {'/'.join(un)} 前面）")
+        if not gated:
+            BAD.append("App 没在台站未设时挡住计算/写表 —— 又拿默认坐标蒙混")
+
     # ── 输出 ──
     for line in OK:
         print(f"  ✓ {line}")
