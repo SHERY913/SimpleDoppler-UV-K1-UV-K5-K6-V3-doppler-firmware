@@ -36,8 +36,7 @@ F_PASS_KT = KT / "PassCalc.kt"
 F_LINK_KT = KT / "RadioLink.kt"
 F_SESS_KT = KT / "RadioSession.kt"
 F_MAIN_KT = KT / "MainScreen.kt"
-F_FAKE = HERE / "fakeradio.py"
-F_RADIO = HERE / "verify_radio.py"
+F_PROTO = HERE / "radio_proto.py"
 
 BAD: list[str] = []
 WARN: list[str] = []
@@ -128,7 +127,7 @@ def main() -> int:
     core, tool, probe = read(F_CORE), read(F_TOOL), read(F_PROBE)
     pass_kt, link_kt, sess_kt = read(F_PASS_KT), read(F_LINK_KT), read(F_SESS_KT)
     main_kt = read(F_MAIN_KT)
-    fake_py, radio_py = read(F_FAKE), read(F_RADIO)
+    proto_py = read(F_PROTO)
 
     # ── 1. 混淆掩码（同一张表在项目里有 4 份拷贝）──
     def hex_list(body: str) -> list[int] | None:
@@ -144,10 +143,8 @@ def main() -> int:
     masks["PC doppler_tool.py"] = hex_list(m.group(1)) if m else None
     m = re.search(r"^MASK = \[(.*?)\]", probe, re.S | re.M)
     masks["PC probe_fw.py"] = hex_list(m.group(1)) if m else None
-    #   假电台是这一张表的第 5 份拷贝。既然已经复制了，就必须一起钉住，
-    #   否则多出来的那份会悄悄变成"第 5 种说法"。
-    m = re.search(r"^MASK = \[(.*?)\]", fake_py, re.S | re.M)
-    masks["假电台 fakeradio.py"] = hex_list(m.group(1)) if m else None
+    m = re.search(r"^MASK = \[(.*?)\]", proto_py, re.S | re.M)
+    masks["协议库 radio_proto.py"] = hex_list(m.group(1)) if m else None
     check("协议混淆掩码（应各 16 字节）", masks)
     for k, v in masks.items():
         if v is not None and len(v) != 16:
@@ -300,8 +297,6 @@ def main() -> int:
         #   同一个时长在项目里出现过第三种说法（1.2 s，是 5 Hz 推帧时代的老阈值），
         #   代码改到 5 s 之后没人回头改注释 —— 这类漂移就是这条要抓的。
         "App 推帧心跳注释": sec(sess_kt, r"(\d+(?:\.\d+)?)\s*秒不来固件就认为手机死"),
-        "假电台默认 watchdog": sec(fake_py, r"--watchdog-ms[^\n]*?default=([\d.]+)", 0.001),
-        "时序层全量模式": sec(radio_py, r"if a\.quick else ([\d.]+)", 0.001),
     }
     check("断链后自动交还时长（秒）", claims)
 

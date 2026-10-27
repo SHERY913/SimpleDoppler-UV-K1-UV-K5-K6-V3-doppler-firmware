@@ -31,7 +31,7 @@ import time
 import serial
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0].replace("\\", "/"))
-from fakeradio import parse_replies, request_bytes  # noqa: E402  同一套帧规则
+from radio_proto import parse_replies, request_bytes  # noqa: E402  同一套帧规则
 
 
 class Radio:

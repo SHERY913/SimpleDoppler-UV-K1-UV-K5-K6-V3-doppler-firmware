@@ -12,7 +12,11 @@ cd /d "%~dp0.."
 set "ROOT=%CD%"
 set "TMP=%ROOT%\.gtmp"
 set "TEMP=%ROOT%\.gtmp"
-set "ADB=%ROOT%\tc\sdk\platform-tools\adb.exe"
+rem adb 的真实位置在工作区根（多普勒 的上一级）的 tc 下，不在 PC工具 里。
+rem 上一版写成 %ROOT%\tc\... 指向 PC工具\tc，那目录从来不存在：脚本前两步都过，
+rem 到 [3/5] 却报「找不到 adb」，端口转发永远做不了，App 就连不上电台。
+set "ADB=%ROOT%\..\tc\sdk\platform-tools\adb.exe"
+if not exist "%ADB%" set "ADB=C:\Program Files\Netease\MuMu\nx_main\adb.exe"
 set "PYTHONIOENCODING=utf-8"
 set "MODE=%~1"
 set "DRY=%MODE%"
@@ -70,7 +74,7 @@ echo    网络已连通 127.0.0.1:7878 固件有回包
 echo  然后「更新电台时间」「固件自检」都能点出结果。
 echo.
 echo  不要点「USB 连接」：那是手机 OTG 直连，模拟器没有 USB Host。
-echo  桥接窗口一关，电台 15 秒后自动回到自己的跟踪，这是固件看门狗，正常。
+echo  桥接窗口一关，电台 5 秒后自动回到自己的跟踪，这是固件看门狗，正常。
 echo ============================================================
 if /i "%QUIET%"=="quiet" exit /b 0
 pause

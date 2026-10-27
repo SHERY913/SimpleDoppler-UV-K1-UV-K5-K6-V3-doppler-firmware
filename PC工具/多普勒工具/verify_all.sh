@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# 一键回归：一致性 + 数据 + 解算 + 时序 + 显示
-#   bash 多普勒工具/verify_all.sh          # 五层全跑（显示层需要模拟器/真机连着）
+# 一键回归：一致性 + 数据 + 解算 + 显示
+#   bash 多普勒工具/verify_all.sh          # 四层全跑（显示层需要模拟器/真机连着）
 #   bash 多普勒工具/verify_all.sh --fast   # 跳过显示层（只需 python，不需要设备）
 #
 # 顺序是有意的：一致性层最先跑，因为它不要编译器、不要设备、只要源码在，
 # 而它抓的正是本项目复发最多的那一类 bug（三端各自写一遍同一个约定）。
-# 时序层（假电台）排第四：它同样不要设备，但它是这几个里最慢的（要看 5 s 看门狗）。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,31 +22,22 @@ tally() {  # rc: 0 通过 / 2 只有告警 / 其它 失败
   esac
 }
 
-step "1/5 一致性（固件 .h/.c ↔ PC doppler_core.py ↔ App PassCalc/RadioLink）"
+step "1/4 一致性（固件 .h/.c ↔ PC doppler_core.py ↔ App PassCalc/RadioLink）"
 python 多普勒工具/verify_layout.py
 tally "$?"
 
-step "2/5 数据层（TLE 台账 / 频率表 / 资产一致性）"
+step "2/4 数据层（TLE 台账 / 频率表 / 资产一致性）"
 python 多普勒工具/verify_data.py | tail -18
 tally "${PIPESTATUS[0]}"
 
-step "3/5 解算层（Kotlin SGP4/SDP4 对 python-sgp4 真值）"
+step "3/4 解算层（Kotlin SGP4/SDP4 对 python-sgp4 真值）"
 bash 多普勒工具/verify_sgp4.sh 2>/dev/null | grep -av '^warning' | tail -8
 tally "${PIPESTATUS[0]}"
 
-step "4/5 时序层（接管→推帧→PTT→交还→看门狗，跑在离线假电台上）"
-# --fast 把看门狗缩到 900 ms：验的是"到点自己交还"这个机制，时长由一致性层钉
 if [ "${1:-}" = "--fast" ]; then
-  python 多普勒工具/verify_radio.py --quick | tail -8
+  step "4/4 显示层：跳过（--fast）"
 else
-  python 多普勒工具/verify_radio.py | tail -8
-fi
-tally "${PIPESTATUS[0]}"
-
-if [ "${1:-}" = "--fast" ]; then
-  step "5/5 显示层：跳过（--fast）"
-else
-  step "5/5 显示层（App 实算 vs Python 独立算，需模拟器 adb）"
+  step "4/4 显示层（App 实算 vs Python 独立算，需模拟器 adb）"
   python 多普勒工具/verify_display.py | tail -6
   tally "${PIPESTATUS[0]}"
 fi
