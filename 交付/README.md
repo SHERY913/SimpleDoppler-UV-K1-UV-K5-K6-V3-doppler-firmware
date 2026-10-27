@@ -5,9 +5,13 @@ APK 和 bin 都是可再生产物，`.gitignore` 故意把它们排除在库外�
 
 | 文件 | 大小 | md5 | 构建自 |
 |---|---|---|---|
-| `多普勒App-debug.apk` | 16,027,972 | `430c3c9030240fe65d6e6061c5dc59eb` | `安卓App` HEAD `bd2635d`，工作树干净 |
+| `多普勒App-debug.apk` | 15,803,247 | `0dca58b1e3f4a13cd4d8e309ab88800e` | `安卓App` HEAD `2690ece`（`versionName 0.2` / `versionCode 2`），工作树干净 |
 | `f4hwn.sstv.doppler.bin` | 101,076 | `a97e6f3e9d748cf3a542fd7a08130a09` | `固件源码/uvk1-v6.3.0` HEAD `4e3996e` |
 | `F4HWN-Doppler.apk` | 15,670,767 | `68c2c1bd7d63b12dffabed58a70c4fab` | 2026-10-25 15:25 改名前的旧发布包，**不等于当前源码**，仅留作追溯 |
+
+上一版 App 包（`430c3c9030240fe65d6e6061c5dc59eb` / 16,027,972 B，构建自 `bd2635d`）
+已移到 `历史-20261027/多普勒App-debug-20261027-1942.apk`（时间戳标的是归档时刻，
+不是它的构建时刻）。
 
 ## APK 不能按字节复现，别拿 md5 判"同代"
 
@@ -54,14 +58,40 @@ App 再比：喂上海坐标与喂默认坐标，五量偏差都是 0.00000。
 偏差全部 0.00000，结果 OK。固件那三处里只有删宏对产物是惰性的，看门狗与信道
 还原两处是真改了代码，FLASH 从 100152 走到 100188。
 
+## 19:42 链路自愈（App 0.2，bin 未变，仍是 4e3996e）
+
+交接文档待办 1 的两件事落地，根因是**它们长在一个全工程没有调用点的页面里**
+（`RadioPage()`，曾 `MainScreen.kt:1736`）：掉线自动重连循环、USB 插入自动连、
+以及全工程唯一让 `linkLost` 归零的 `onRecheck()` 调用点，全都只在那儿。所以
+"USB 一拔就再也连不上、状态行永远挂着'连接丢失：…'"一直没被修——逻辑是对的，
+只是没人调用。现在搬到 `MainScreen()` 的会话级 `LaunchedEffect` / `DisposableEffect`。
+
+同轮还修了三处同源问题：`describe()` 用 `lastMode` 决定整段文案（网络桥失败一次后
+插 USB 也报"网络已断开"）、USB 授权 PendingIntent 的 requestCode 恒 0（后一次覆盖
+前一次的回调＝"点了允许没反应"，自动重连会反复发起授权，必须改）、chip 的 enabled
+直接读非 Compose 的 `isOpen/isReady`（值被冻结，"断开"永远灰着）。
+
+**证据级别：模拟器 + 本机假电台，不是空中链路。** 闭环脚本不入库，放在
+`default-workspace/_tmp_verify/fake_radio.py`（按 `radio_proto.py` 的帧规则回包）：
+`adb reverse tcp:7878 tcp:7878` → App 点「网络桥」→ 状态「网络 127.0.0.1:7878 · 已连通
+（固件有回包）」→ 杀桥进程 22 s 内变「断开：自动重连后不回包」+ 琥珀色「自动重连中：
+第 3 次，上次尝试在 几秒前」（「断开」灰掉、连接按钮恢复）→ 桥重新起来 12~16 s 内
+自动接回「已自动重连（第 4 次尝试）（13 秒前）」→ 78 s 后降级成「上次：…（1 分钟前）」。
+`always_finish_activities=1` 走一遍 Activity 重建，状态行仍是带年龄的历史文案。
+复现三次、结论一致。
+
+**没验到的**：真实 USB 电台的插拔（这台机器没有硬件）、空中链路、固件 `0x80`
+（刷写中 PTT 锁定）的显示。这几条都写在文档里，别当成"已验证"。
+
 ## 重建命令
 
 ```bash
 # App（JDK 与 gradle 都在 tc 下，路径硬编码不可挪）
 export JAVA_HOME=C:/Users/13766/.jdk/jdk-21.0.2
 cd 安卓App/android-app
-../../tc/gradle-8.7/bin/gradle --offline assembleDebug
+../../../tc/gradle-8.7/bin/gradle --offline assembleDebug
 #   → app/build/outputs/apk/debug/app-debug.apk
+#   注意 tc/ 在 default-workspace 根下，不是 多普勒/ 下：从 android-app 往上三层
 
 # 固件（只能在 default-workspace 根下写文件，见交接文档铁律 2）
 cd 固件源码/uvk1-v6.3.0 && python .gfw.py
