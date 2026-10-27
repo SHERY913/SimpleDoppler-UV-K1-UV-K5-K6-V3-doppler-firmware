@@ -250,7 +250,10 @@ def main() -> int:
 
     # ── 5. 命令 ID：App 发的每一条，固件必须认 ──
     fw_cmd = {int(x, 16) for x in re.findall(r"case (0x07[0-9A-F]{2}):", uart)}
-    kt_cmd = {int("0x" + x, 16) for x in re.findall(r"0x(07[0-9A-F]{2})", link_kt)}
+    # 只认真的发出去的那些：`ask(0x076A, …)`。以前把 RadioLink.kt 里所有 0x07xx
+    # 字面量都算进来，于是注释、范围判断（cmd in 0x0760..0x076F）全被当成命令，
+    # 报出"App 会发、但固件没有分支"。要校的是调用点，不是源码文本。
+    kt_cmd = {int("0x" + x, 16) for x in re.findall(r"ask\(\s*0x(07[0-9A-F]{2})", link_kt)}
     if not fw_cmd or not kt_cmd:
         BAD.append(f"命令 ID 解析失效：固件 {len(fw_cmd)} 条 / App {len(kt_cmd)} 条，"
                    f"至少一端一个都没抓到 —— 本检查不可信")
