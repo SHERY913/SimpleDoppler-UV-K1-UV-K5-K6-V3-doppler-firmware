@@ -5,7 +5,7 @@ APK 和 bin 都是可再生产物，`.gitignore` 故意把它们排除在库外�
 
 | 文件 | 大小 | md5 | 构建自 |
 |---|---|---|---|
-| `多普勒App-debug.apk` | 16,027,972 | `430c3c9030240fe65d6e6061c5dc59eb` | `安卓App` HEAD `3ae40e2` 或更新，工作树干净 |
+| `多普勒App-debug.apk` | 16,027,972 | `430c3c9030240fe65d6e6061c5dc59eb` | `安卓App` HEAD `bd2635d`，工作树干净 |
 | `f4hwn.sstv.doppler.bin` | 101,076 | `a97e6f3e9d748cf3a542fd7a08130a09` | `固件源码/uvk1-v6.3.0` HEAD `4e3996e` |
 | `F4HWN-Doppler.apk` | 15,670,767 | `68c2c1bd7d63b12dffabed58a70c4fab` | 2026-10-25 15:25 改名前的旧发布包，**不等于当前源码**，仅留作追溯 |
 
