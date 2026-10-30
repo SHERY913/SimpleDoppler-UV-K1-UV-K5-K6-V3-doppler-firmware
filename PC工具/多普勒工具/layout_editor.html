@@ -77,7 +77,13 @@
       <code>$A</code> AOS 时间 &nbsp; <code>$W</code> 频偏跨度<br>
       <code>$Y</code> 上行频率 &nbsp; <code>$Z</code> 亚音 &nbsp; <code>$G</code> 斜距 km &nbsp; <code>$H</code> 径向速度 &nbsp; <code>$B</code> 日期 MM-DD<br>
       <code>$C</code> 时钟 &nbsp; <code>$K</code> 校准计时 &nbsp; <code>$X</code> 校准系数 &nbsp;
-      <code>$R</code> 距 AOS 秒 &nbsp; <code>$I</code> 输入区 &nbsp; <code>$Q</code> 功率 &nbsp; <code>$J</code> APP 角标
+      <code>$R</code> 距 AOS 秒 &nbsp; <code>$I</code> 输入区 &nbsp; <code>$Q</code> 功率 &nbsp; <code>$J</code> APP 角标<br>
+      <span>26 个字母用完之后新增的（符号占位符）：</span><br>
+      <code>$!</code> ARMED/M START &nbsp; <code>$@</code> 空表原因 &nbsp; <code>$V</code> 校准系数（校准页）<br>
+      <b>信息页（INFO，page 6）：</b><code>$#</code> 固件版本 &nbsp; <code>$%</code> 编译日期 &nbsp;
+      <code>$&amp;</code> 编译时间 &nbsp; <code>$?</code> phase 号 &nbsp; <code>$=</code> 电池电压 &nbsp;
+      <code>$^</code> 表条数+表日期 &nbsp; <code>$&lt;</code> 调谐次数 &nbsp; <code>$&gt;</code> 校准 ppm &nbsp;
+      <code>$+</code> 开机时长
     </div>
     <div class="btns">
       <button onclick="loadDefault()">恢复默认布局</button>
@@ -88,12 +94,17 @@
 <script src="fonts_data.js"></script>
 <script>
 const W=128, H=64, Z=6;
-const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE'];
-const SAMPLE={ $F:'145.7976', $E:'42', $D:'-87', $O:'-2360', $P:'60', $L:'-04:12',
+const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE','INFO'];
+const SAMPLE={ $F:'145.7976', $E:'42', $D:'<-125', $O:'-2360', $P:'60', $L:'-04:12',
                $U:'06:18', $N:'1', $T:'17', $M:'68', $A:'10:20', $W:'6.5K',
                $S:'RS-44 & BR', $C:'22:41:07', $K:'12:34', $X:'1.0062',
                $R:'04:12', $I:'------', $Q:'5W', $Y:'145.98900', $Z:'T67.0', $J:'APP',
-               $G:'475', $H:'-0.8', $B:'10-26' };
+               $G:'475', $H:'-0.8', $B:'10-26',
+               /* 符号占位符：$ 后面跟符号不是合法的 JS 标识符，键必须加引号。 */
+               '$!':'M  START', '$@':'NO TABLE', '$V':'1.0062',
+               /* 信息页（page 6）专用，全部只读 */
+               '$#':'v6.3.0', '$%':'Oct 27 2026', '$&':'23:05:56', '$?':'1',
+               '$=':'7.9V', '$^':'17 26-10-27', '$<':'128', '$>':'+12', '$+':'3h12m' };
 
 let model = null, page = 0, sel = 0, drag = null;
 
@@ -352,7 +363,7 @@ function defaultModel(){
       {text: '$Q', font: 'tiny', x: 103, y: 12, align: 'left'},
       {text: '$C', font: 'tiny', x: 95, y: 38, align: 'right'},
       {text: '$H km/s', font: 'tiny', x: 6, y: 37, align: 'left'},
-      {text: '$D', font: 'bold', x: 73, y: 25, align: 'left'},
+      {text: '$D', font: 'bold', x: 101, y: 25, align: 'right'},
       {text: 'dB', font: 'bold', x: 103, y: 25, align: 'left'},
       {text: '$J', font: 'tiny', x: 127, y: 32, align: 'right'},
     ],
@@ -390,6 +401,19 @@ function defaultModel(){
       {text: 'EL $K   REAL $I', font: 'tiny', x: 2, y: 41, align: 'left'},
       {text: 'CAL $X', font: 'tiny', x: 2, y: 49, align: 'left'},
       {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+    ],
+    /* 6 —— 信息页：DOPPLER 页按 5 进入（固件 sub==3），再按 5 或 EXIT 返回。
+       这里必须与 doppler_layout.h 的 page 6 逐字一致，否则从本编辑器导出
+       就会把信息页改成另一副样子（文案的真值是固件那份）。 */
+    [
+      {text: 'DOPPLER INFO', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: 'FW $# PROTO6', font: 'tiny', x: 2, y: 9, align: 'left'},
+      {text: 'BLD $% $&', font: 'tiny', x: 2, y: 17, align: 'left'},
+      {text: 'BY F4HWN+DPH', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: 'PH $? $= $J', font: 'tiny', x: 2, y: 33, align: 'left'},
+      {text: 'TBL $^ T $<', font: 'tiny', x: 2, y: 41, align: 'left'},
+      {text: 'CAL $> UP $+', font: 'tiny', x: 2, y: 49, align: 'left'},
+      {text: '5/EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
     ],
   ];
 }

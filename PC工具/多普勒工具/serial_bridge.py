@@ -5,6 +5,11 @@ App 连 127.0.0.1:7878（配合 `adb reverse tcp:7878 tcp:7878`），
 这里把这路 TCP 原样转发到串口。
 
     python serial_bridge.py --port COM7 --listen 7878
+    python serial_bridge.py --port auto --adb     # 模拟器：口和隧道都自己管
+
+加 `--adb` 后桥自己维持 adb reverse，每 3 分钟补一次。非加不可：隧道不是
+持久设置，adb 服务一重启或模拟器一冷启动它就没了，而且哪儿都不报错，
+App 那边只表现为"连不上 127.0.0.1:7878（连接被拒绝）"。
 
 协议是无状态的字节流，桥上不做任何解析，丢包/时序与原样一致。
 
@@ -14,7 +19,9 @@ App 连 127.0.0.1:7878（配合 `adb reverse tcp:7878 tcp:7878`），
 现在串口掉了会自己重开，TCP 不动，App 不用重连。
 """
 import argparse
+import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -40,7 +47,15 @@ class Port:
             return True
         except Exception as e:
             self.ser = None
-            print("[bridge] 打不开 %s: %s" % (self.name, e), flush=True)
+            # 刚刷完固件最容易碰到这两种：设备先消失（FileNotFound）再回来被
+            # 刷机工具/别的串口程序独占（PermissionError）。把话说清楚，
+            # 否则用户只看到一屏英文异常，不知道该关哪个程序。
+            hint = ""
+            if isinstance(e, PermissionError):
+                hint = "（端口被别的程序独占：关掉刷机工具/串口助手，或拔插一次 USB）"
+            elif isinstance(e, FileNotFoundError):
+                hint = "（串口不存在：手台是不是还在重启/线松了）"
+            print("[bridge] 打不开 %s: %s%s" % (self.name, e, hint), flush=True)
             return False
 
     def dead(self, why: str) -> None:
@@ -56,7 +71,7 @@ class Port:
             self.ser = None
 
     def ensure(self, tries: int = 60) -> bool:
-        """重开串口，最多等 tries*200 ms（默认 12 s）。
+        """重开串口，最多等 tries*200 ms（默认 12 s；刷完固件走 300 次 = 60 s）。
 
         手台发射瞬间 USB 掉线多半会重枚举：同一个物理口换一个 COM 号回来，
         光按原名重开永远失败。所以每 20 次尝试就扫一遍端口，认 VID 36B7
@@ -119,7 +134,7 @@ def pump_from_port(port: Port, conn: socket.socket, stop: threading.Event, log: 
             continue
         except OSError as e:
             port.dead(str(e))
-            if not port.ensure():
+            if not port.ensure(300):
                 print("[bridge] 串口没能回来，断开这个 client", flush=True)
                 stop.set()
                 return
@@ -155,10 +170,71 @@ def pump_from_tcp(port: Port, conn: socket.socket, stop: threading.Event, log: b
             continue
         except OSError as e:
             port.dead(str(e))
-            if not port.ensure():
+            if not port.ensure(300):
                 print("[bridge] 串口没能回来，断开这个 client", flush=True)
                 stop.set()
                 return
+
+
+def resolve_adb(explicit: str) -> str:
+    """adb 只认一个，别混用。
+
+    混用两个 adb.exe 本身不会踢掉服务（实测 37.0.1 与 36.0.0 共存没问题），
+    但 reverse 是记在"某一台 adb 服务"上的：脚本用 A 建隧道、另一个工具用 B
+    起了第二个服务或 kill-server，隧道就没了，App 侧只看得见一句
+    "连不上 127.0.0.1:7878"。所以这里固定选一个，并把隧道当成长期要维持的东西。
+    """
+    if explicit:
+        return explicit if os.path.exists(explicit) else ""
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.abspath(os.path.join(here, "..", "..", ".."))
+    for cand in (
+        os.path.join(root, "tc", "sdk", "platform-tools", "adb.exe"),
+        r"C:\Program Files\Netease\MuMu\nx_main\adb.exe",
+    ):
+        if os.path.exists(cand):
+            return cand
+    return ""
+
+
+def tunnel_keeper(adb: str, port: int) -> None:
+    """每 3 分钟补一次 adb reverse。
+
+    隧道在两种情况下会静悄悄消失：adb 服务被重启（另一个工具 kill-server、
+    版本不一致、IDE 插手），或模拟器冷启动。两种都不报错，App 只会一直
+    "连接被拒绝"，而桥接窗口上看不出任何异常 —— 这正是"昨天还能连"的来源。
+    补做是幂等的，所以直接轮询。
+    """
+    known = None
+    while True:
+        alive = []
+        try:
+            out = subprocess.run([adb, "devices"], capture_output=True, text=True,
+                                 timeout=10, creationflags=flags()).stdout
+            for line in out.splitlines()[1:]:
+                f = line.split()
+                if len(f) >= 2 and f[1] == "device":
+                    subprocess.run([adb, "-s", f[0], "reverse",
+                                    "tcp:%d" % port, "tcp:%d" % port],
+                                   capture_output=True, timeout=10,
+                                   creationflags=flags())
+                    alive.append(f[0])
+            if not alive:
+                # MuMu 的 adb 端口（16384）；有的版本只认这个,不认 emulator-5554。
+                subprocess.run([adb, "connect", "127.0.0.1:16384"],
+                               capture_output=True, timeout=10, creationflags=flags())
+        except Exception as e:
+            print("[bridge] adb reverse 补做失败：%s" % e, flush=True)
+        if alive != known:
+            print("[bridge] 隧道 tcp:%d -> %s：%s" % (
+                port, adb, " ".join(alive) if alive else "无设备"), flush=True)
+            known = alive
+        time.sleep(180)
+
+
+def flags():
+    # 别给辅助调用弹控制台窗口
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def serve(args):
@@ -236,8 +312,17 @@ def main():
     ap.add_argument("--listen", type=int, default=7878)
     ap.add_argument("--listen-host", default="127.0.0.1")
     ap.add_argument("--log", action="store_true", help="把两个方向的字节流打成 hex，用来确认 App 到底发了什么")
+    ap.add_argument("--adb", default="", nargs="?", const="auto",
+                    help="顺手维持 adb reverse（模拟器用）。不给路径就自己找，且只用这一个 adb")
     a = ap.parse_args()
     a.port = resolve_port(a.port)
+    if a.adb:
+        exe = resolve_adb("" if a.adb == "auto" else a.adb)
+        if not exe:
+            print("[bridge] 找不到 adb，跳过隧道维持；模拟器需要先自己 adb reverse", flush=True)
+        else:
+            threading.Thread(target=tunnel_keeper, args=(exe, a.listen),
+                             daemon=True).start()
     serve(a)
 
 

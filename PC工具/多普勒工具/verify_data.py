@@ -116,6 +116,10 @@ def load(path: Path) -> dict[str, list[str]]:
         return {}
     out: dict[str, list[str]] = {}
     for k, v in data.items():
+        # `_` 开头的顶层键是元数据（如 refresh_tle.py 写的 _sources），不是卫星，
+        # 不参与"结构对不对 / 两侧是否一致"的比对，否则每次刷新都多一条假告警。
+        if str(k).startswith("_"):
+            continue
         if not isinstance(v, list) or len(v) < 3:
             p0(f"{path.name} 里 {k} 结构不对（应为 [名称, line1, line2]）")
             continue
@@ -219,8 +223,12 @@ def main() -> int:
             if not (RADIO_MIN_MHZ <= f <= RADIO_MAX_MHZ):
                 p1(f"Freqs {norad} {nm}: {label} {f} MHz 超出 UV-K5 接收范围 "
                    f"({RADIO_MIN_MHZ:.0f}-{RADIO_MAX_MHZ:.0f}) —— 收不到，只能看数据")
-        if down and up and abs(down - up) < 1.0:
-            p1(f"Freqs {norad} {nm}: 下行 {down} 与上行 {up} MHz 太近，怀疑写反或填错")
+        # 1.0 MHz 会把"V/V 或 U/U 跨频中继"也当成错误：CSS 就是
+        # 145.985 下行 / 145.850 上行，只差 135 kHz，但它是真中继。
+        # 真正错的是"上下行完全一样"，那是 simplex 记录被当成转发器。
+        if down and up and abs(down - up) < 0.05:
+            p1(f"Freqs {norad} {nm}: 下行 {down} 与上行 {up} MHz 几乎同频，"
+               f"除非是 simplex，否则写反或填错")
         if tone < 0 or tone > 254:
             p2(f"Freqs {norad} {nm}: 哑音 {tone} Hz 不像 CTCSS 标准值")
 

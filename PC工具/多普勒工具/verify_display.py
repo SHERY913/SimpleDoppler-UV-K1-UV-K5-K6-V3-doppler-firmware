@@ -194,7 +194,7 @@ def main() -> int:
                 if norad not in tles:
                     print(f"{norad}: TLE 里没有这颗星，跳过")
                     continue
-                name, l1, l2 = tles[norad]
+                name, l1, l2 = tles[norad][:3]   # tles.json 现为 12 字段，取前 3 位
                 sats[norad] = Satrec.twoline2rv(l1, l2, WGS72)
             tr = truth(sats[norad], station, p["t"])
             if tr is None:

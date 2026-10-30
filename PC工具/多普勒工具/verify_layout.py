@@ -37,6 +37,8 @@ F_LINK_KT = KT / "RadioLink.kt"
 F_SESS_KT = KT / "RadioSession.kt"
 F_MAIN_KT = KT / "MainScreen.kt"
 F_PROTO = HERE / "radio_proto.py"
+F_LAYOUT = FW / "doppler_layout.h"
+F_EDITOR = HERE / "layout_editor.html"
 
 BAD: list[str] = []
 WARN: list[str] = []
@@ -236,7 +238,7 @@ def main() -> int:
         body = dop_c.split("void DOPPLER_ExtPush", 1)[1].split("\n}\n", 1)[0]
         m = re.search(r"p\[(\d+)u?\s*\+\s*k\]", body)
         c_off = int(m.group(1)) if m else None
-        m = re.search(r"len\s*<\s*(\d+)u?", body)
+        m = re.search(r"\|\|\s*len\s*<\s*(\d+)u?", body)
         c_min = int(m.group(1)) if m else None
     k_off = k_min = None
     if "fun pushExt" in sess_kt:
@@ -246,7 +248,18 @@ def main() -> int:
         m = re.search(r"maxOf\((\d+),\s*size\)", body)
         k_min = int(m.group(1)) if m else None
     check("0x076C 名字字段起始偏移", {"固件 p[21+k]": c_off, "App 21+nb.size": k_off})
-    check("0x076C 最短合法帧长", {"固件 len<28 丢弃": c_min, "App maxOf(28,size)": k_min})
+    # 固件下限现在按真实布局取 21，App 仍补零到 28（兼容只认 28 的旧固件），
+    # 所以这里要的是"App 发出去的长度 ≥ 固件下限"，不是两端数字相等。
+    if c_min is None or k_min is None:
+        BAD.append("0x076C 最短帧长解析失效（固件或 App 一侧没抓到数字）")
+    elif k_min < c_min:
+        # 这是真漂移，不是告警：短名星（"ISS" 24 字节）会被静默丢掉整帧。
+        # 以前这里 append 到一个从没定义过的 DRIFT 上，真出事时抛 NameError，
+        # 检查自己先崩 —— 而"崩了"和"过了"在人眼里长得一样。
+        BAD.append(f"0x076C 最短帧长：App 只保证 {k_min} 字节，固件下限 {c_min} —— "
+                   f"短名星（ISS）会被静默丢弃")
+    else:
+        OK.append(f"0x076C 最短帧长：固件下限 {c_min} ≤ App 补零后 {k_min}")
 
     # ── 5. 命令 ID：App 发的每一条，固件必须认 ──
     fw_cmd = {int(x, 16) for x in re.findall(r"case (0x07[0-9A-F]{2}):", uart)}
@@ -359,6 +372,65 @@ def main() -> int:
                   f"（挡在 {'/'.join(un)} 前面）")
         if not gated:
             BAD.append("App 没在台站未设时挡住计算/写表 —— 又拿默认坐标蒙混")
+
+    # ── 10. 表驱动排版的页表与占位符 ──
+    #   App/app/doppler_layout.h 是 layout_editor.html 导出的产物，页名在排版器
+    #   的 PAGES 里，占位符的**实现**只在 doppler.c 的 DPH_Expand 里、**预览**在
+    #   排版器的 SAMPLE 里。三处各写一遍，而漏的地方一个都不会报错：
+    #     漏页       → 用排版器重新导出时整页被丢掉（新增的信息页就这么白加）
+    #     漏实现     → 屏幕上原样打出 "$%" 而不是日期
+    #     漏预览     → 排版器里那行是空白，没人看得出该填什么
+    #   注意 App 侧 UiLayout.kt 不参与这条：它是 App 自己的按钮/天空页布局
+    #   （PAGE_RADIO / PAGE_SKY），不镜像固件这套页表，固件加页不需要动它。
+    lay = read(F_LAYOUT)
+    ed = read(F_EDITOR)
+    lay_items = [(int(p), txt) for p, txt in re.findall(
+        r"\{\s*(\d+)\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\"([^\"]*)\"\s*\}", lay)]
+    if not lay_items:
+        BAD.append("doppler_layout.h 解析不到任何条目 —— 排版表格式变了，本检查需要更新")
+    lay_pages = {p for p, _t in lay_items}
+    lay_ph = {t[i + 1] for _p, t in lay_items for i in range(len(t) - 1) if t[i] == "$"}
+
+    m = re.search(r"PAGES\s*=\s*\[(.*?)\]", ed, re.S)
+    ed_pages = re.findall(r"'([^']+)'", m.group(1)) if m else []
+    m = re.search(r"const SAMPLE=\{(.*?)\};", ed, re.S)
+    ed_ph = set(re.findall(r"\$([ -~])", m.group(1))) if m else set()
+    fw_ph = set(re.findall(r"case '(.)':", dop_c))
+
+    if not ed_pages:
+        BAD.append("layout_editor.html 解析不到 PAGES —— 本检查失效")
+    else:
+        over = sorted(p for p in lay_pages if p >= len(ed_pages))
+        if over:
+            BAD.append(
+                f"固件排版表用到 page {over}，但排版器 PAGES 只登记了 {len(ed_pages)} 页"
+                f"（{', '.join(ed_pages)}）—— 在 layout_editor.html 里重新导出 doppler_layout.h"
+                f" 会把这些页整页丢掉。该改：PC 工具 layout_editor.html 的 PAGES 与 "
+                f"defaultModel()，补上对应页名与行（本次固件新增的是 page 6 = INFO）。")
+        else:
+            OK.append(f"排版页口径：固件用 page {sorted(lay_pages)}，排版器登记 {len(ed_pages)} 页"
+                      f"（{', '.join(ed_pages)}）")
+
+    if not fw_ph:
+        BAD.append("doppler.c 里解析不到任何 `case 'x':` —— 占位符实现变了，本检查需要更新")
+    else:
+        miss_impl = sorted(lay_ph - fw_ph)
+        if miss_impl:
+            BAD.append("布局用了 $" + " $".join(miss_impl) +
+                       "，但 doppler.c 的 DPH_Expand 没有对应 case —— 屏幕上会原样打出 \"$\" + 那个字")
+        else:
+            OK.append(f"布局占位符全部有实现（{len(lay_ph)} 种，固件共 {len(fw_ph)} 种）")
+
+    if not ed_ph:
+        BAD.append("layout_editor.html 解析不到 SAMPLE 表 —— 本检查失效")
+    else:
+        miss_prev = sorted(lay_ph - ed_ph)
+        if miss_prev:
+            BAD.append("布局用了 $" + " $".join(miss_prev) +
+                       "，但排版器的 SAMPLE 表没登记 —— 编辑器里那几行预览是空白。"
+                       "该改：PC 工具 layout_editor.html 的 SAMPLE（顺便补上面那行占位符说明）")
+        else:
+            OK.append(f"排版器 SAMPLE 覆盖布局里全部 {len(lay_ph)} 种占位符")
 
     # ── 输出 ──
     for line in OK:

@@ -4,6 +4,7 @@
 用途：当"App 显示连上了但电台没反应"时，分清是固件没刷、还是协议没被认。
 
     python probe_fw.py            # 只读状态
+    python probe_fw.py --fw-tag   # 只读：固件标识 + 生效 ppm（0x0772/0x0773）
     python probe_fw.py --take     # 顺带发 0x0768=1 和 0x076C，看 phase 变不变
 """
 
@@ -11,6 +12,8 @@ import sys
 import time
 
 import serial
+
+import radio_proto          # 命令 ID 与 0x0773 的解析只在这里写一份
 
 MASK = [0x16, 0x6C, 0x14, 0xE6, 0x2E, 0x91, 0x0D, 0x40,
         0x21, 0x35, 0xD5, 0x40, 0x13, 0x03, 0xE9, 0x80]
@@ -92,8 +95,43 @@ def resolve_port():
     return PORT
 
 
+def show_fw_tag(ser) -> bool:
+    """只读查询 0x0772：固件是谁、版本多少、ppm 实际生效到多少。
+
+    故意只发这一条命令：0x0772 在固件里只读 flash 里的校准结构体和几个
+    RAM 变量，不写 PLL、不写 VFO、不动接管状态、不碰 REG_3B。所以它能在
+    **任何时刻**跑 —— 包括正接着 App、过境进行中、甚至发射中。
+    """
+    print("== 0x0772 固件标识（只读） ==")
+    c, p = ask(ser, radio_proto.CMD_FW_TAG)
+    if c != radio_proto.FW_TAG_REPLY:
+        if c is None:
+            print("   没有回包 -> 这版固件不认 0x0772（0x076A 还能回、装的是旧固件）。")
+        else:
+            print(f"   回包 ID 0x{c:04X}，不是 0x0773（回包变成别的命令了，别猜，先查固件）。")
+        return False
+    try:
+        info = radio_proto.parse_fw_tag(p)
+    except ValueError as e:
+        print(f"   {e}")
+        return False
+
+    print(f"   ver      = {info['ver'] or '(空)'}")
+    print(f"   ppm      = {info['ppm']:+d}   （固件钳位后真正写进 REG_3B 的值）")
+    print(f"   ppm_max  = {info['ppm_max']}   （存储侧与施加侧共用的上限）")
+    print(f"   proto    = {info['proto']}   （6 = 带第二套逻辑页）")
+    print(f"   phase    = {info['phase']} ({PHASE.get(info['phase'], '?')})")
+    print(f"   clamped  = {info['clamped']}")
+    if info["clamped"]:
+        print(f"   注意 ppm 已经顶在 ±{info['ppm_max']}：要么用户确实填了这个值，"
+              f"要么填了更大的被钳到这里 —— 0x0772 只回生效值，分不出这两种，"
+              f"要原始输入得看 App/PC 那边存的值。")
+    return True
+
+
 def main():
     take = "--take" in sys.argv
+    tag_only = "--fw-tag" in sys.argv
     resolve_port()
     ser = None
     for _ in range(10):          # 端口偶尔被上一次的进程抓着，等它松手
@@ -110,6 +148,13 @@ def main():
         print("  3) 拔掉 USB 线，等 3 秒再插回（电台保持开机），重新双击本脚本")
         raise SystemExit(3)
     time.sleep(0.2)
+
+    if tag_only:
+        # 只读档：问完就走，后面 0x0768/0x076C 一概不发，免得"只想看一眼版本"
+        # 的人顺手把电台推进接管态。
+        show_fw_tag(ser)
+        ser.close()
+        return
 
     print("== 1) 0x076A 固件自检 ==")
     c, p = ask(ser, 0x076A)
@@ -139,6 +184,10 @@ def main():
         print(f"   接管={'是' if state & 1 else '否'}  过境中={'是' if state & 2 else '否'}"
               f"  表={'有' if state & 4 else '无'}  武装={'是' if state & 8 else '否'}"
               f"  新页开关={'开' if state & 0x10 else '关'}")
+
+    # 顺手问一句版本号（0x0772 也是只读的）。老固件不认这条命令时只多等
+    # 一次超时，不会动任何寄存器。
+    show_fw_tag(ser)
 
     if not take:
         return

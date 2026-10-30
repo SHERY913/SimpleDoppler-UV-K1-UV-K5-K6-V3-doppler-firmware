@@ -23,9 +23,14 @@ set "DRY=%MODE%"
 set "QUIET=%MODE%"
 if not exist "%TMP%" mkdir "%TMP%"
 
-echo [1/5] 找电台串口 VID 36B7 ...
+echo [1/5] 找手台串口（0x076A 探针优先）...
 set "PORT="
+rem 先用 find_port.py 找：它拿 0x076A 探针问一句"你是不是手台"，不看 VID。
+rem 探针没回（比如电台没开机）才退回按 VID 36B7 猜 —— CH340 全家共用
+rem 1A86:7523，只认 VID 会挑到空的转接线上去。
+python "%~dp0find_port.py" --only-device > "%TMP%\port2.txt" 2>nul
 python -c "import serial.tools.list_ports as l;[print(p.device) for p in l.comports() if p.vid==0x36b7]" > "%TMP%\port.txt" 2>nul
+if exist "%TMP%\port2.txt" for /f "usebackq delims=" %%P in ("%TMP%\port2.txt") do if not "%%P"=="" if not defined PORT set "PORT=%%P"
 if exist "%TMP%\port.txt" for /f "usebackq delims=" %%P in ("%TMP%\port.txt") do if not "%%P"=="" if not defined PORT set "PORT=%%P"
 if not defined PORT goto noport
 echo       %PORT%
@@ -33,9 +38,9 @@ echo       %PORT%
 echo [2/5] 起桥接 %PORT% 到 127.0.0.1:7878 ...
 if /i "%DRY%"=="dry" goto dryskip
 if /i "%QUIET%"=="quiet" (
-  start "" pythonw "%ROOT%\多普勒工具\serial_bridge.py" --port %PORT% --listen 7878 > "%TMP%\bridge.log" 2>&1
+  start "" pythonw "%ROOT%\多普勒工具\serial_bridge.py" --port %PORT% --listen 7878 --adb "%ADB%" > "%TMP%\bridge.log" 2>&1
 ) else (
-  start "doppler bridge" cmd /k python "%ROOT%\多普勒工具\serial_bridge.py" --port %PORT% --listen 7878
+  start "doppler bridge" cmd /k python "%ROOT%\多普勒工具\serial_bridge.py" --port %PORT% --listen 7878 --adb "%ADB%"
 )
 for /l %%I in (1,1,16) do (
   python -c "import socket,sys;s=socket.socket();sys.exit(0 if s.connect_ex(('127.0.0.1',7878))==0 else 1)" && goto ready
@@ -58,10 +63,21 @@ for /f "skip=1 tokens=1" %%D in (%TMP%\dev.txt) do if not "%%D"=="" if not defin
 if not defined DEV goto nodev
 echo       %DEV%
 
-echo [4/5] adb reverse tcp:7878 ...
+echo [4/5] adb reverse tcp:7878
+rem 以前只给"第一台"设备做 reverse。机器上同时开着 MuMu 和别的模拟器时，
+rem adb devices 的第一行未必是你在看的那台 —— App 里点"网络桥"就永远
+rem ECONNREFUSED，而电脑这边看起来一切正常。现在给每一台在线设备都做。
 if /i "%DRY%"=="dry" goto dryend
-"%ADB%" -s %DEV% reverse tcp:7878 tcp:7878
-if errorlevel 1 goto noreverse
+set "ANYOK="
+for /f "skip=1 tokens=1" %%D in (%TMP%\dev.txt) do (
+  if not "%%D"=="" (
+    "%ADB%" -s %%D reverse tcp:7878 tcp:7878 >nul 2>&1 && (
+      echo       %%D ok
+      set "ANYOK=1"
+    ) || echo       %%D 失败（重启该模拟器后重跑本文件）
+  )
+)
+if not defined ANYOK goto noreverse
 "%ADB%" -s %DEV% reverse --list
 
 echo [5/5] 打开 App ...

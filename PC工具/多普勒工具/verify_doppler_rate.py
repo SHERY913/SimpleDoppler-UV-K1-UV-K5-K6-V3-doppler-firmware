@@ -31,7 +31,23 @@ sys.path.insert(0, HERE)
 import doppler_core as core  # noqa: E402
 from sgp4.api import Satrec, WGS72  # noqa: E402
 
-BAND_PEAK_KHZ_MIN = (3.0, 4.2)      # kHz/min
+BAND_PEAK_KHZ_MIN = (3.0, 4.2)      # kHz/min —— 只在"近乎头顶"那趟才成立，见下
+PEAK_OVERHEAD_HZ_S = 59.0           # Look4Sat 实测的头顶过顶峰值（ISS @ 145.8 MHz）
+HIGH_EL_DEG = 70.0                  # 仰角到了这个数，才配用上面那条绝对带
+EL_EXPONENT = 0.75                  # 峰值随最高仰角的标度，实测拟合（见下）
+PEAK_TOL = (0.65, 1.15)             # 相对"按仰角折算的预期"允许的带宽
+
+# 为什么绝对带会自己翻脸：峰值 |df/dt| 不是常数，它随这趟过境的最高仰角变。
+# 2026-10-28 用生产解算器把 ISS 未来 20 天 81 趟全扫了一遍（台站 23.19N
+# 113.42E）：
+#     el_max   6.6° 12.5° 22.8° 30.8° 46.1° 52.8° 71.1° 79.5°
+#     峰值Hz/s 13.6  17.8  26.2  32.4  44.1  47.0  55.8  58.5
+#     /头顶值 .23   .30   .45   .55   .75   .80   .95  1.00
+# 按 sin(el_max)^0.75 折算，残差除 6.6° 那一档外都在 ±10% 内。
+# 而 81 趟里有 41 趟最高仰角不到 20° —— 拿 (3.0, 4.2) kHz/min 那种绝对带去卡
+# "未来 48 小时里最好的那趟"，等于让检查取决于日历：大多数日子它都该红，
+# 红了还不是代码的错。一个经常误报的检查，最后学会的是"别理它"。
+# 所以：仰角够高时保留 Look4Sat 的绝对锚点，其余情况改成按仰角折算。
 BAND_AOS_RDOT_KMS = (6.3, 7.2)      # km/s，AOS 就该接近满值
 TCA_RDOT_MAX_KMS = 0.3              # TCA 附近径向速度必须接近 0
 
@@ -142,8 +158,18 @@ def main():
 
     bad = []
     khz_min = peak * 60 / 1000
-    if not (BAND_PEAK_KHZ_MIN[0] <= khz_min <= BAND_PEAK_KHZ_MIN[1]):
-        bad.append(f"峰值 {khz_min:.2f} kHz/min 不在 {BAND_PEAK_KHZ_MIN}")
+    # 按这趟的实际最高仰角折算预期；仰角不够高时不再用绝对带（见上面的实测表）
+    expect = PEAK_OVERHEAD_HZ_S * (math.sin(math.radians(p.max_el)) ** EL_EXPONENT)
+    lo, hi = expect * PEAK_TOL[0], expect * PEAK_TOL[1]
+    print(f"  预期（按 el_max {p.max_el:.1f}° 折算）{expect:.1f} Hz/s，"
+          f"容许 {lo:.1f}…{hi:.1f}")
+    if not (lo <= peak <= hi):
+        bad.append(f"峰值 {peak:.1f} Hz/s 不在按仰角折算的 [{lo:.1f}, {hi:.1f}]"
+                   f"（el_max {p.max_el:.1f}°，头顶参考 {PEAK_OVERHEAD_HZ_S:.0f} Hz/s）")
+    if p.max_el >= HIGH_EL_DEG and not (
+            BAND_PEAK_KHZ_MIN[0] <= khz_min <= BAND_PEAK_KHZ_MIN[1]):
+        bad.append(f"头顶过顶（el_max {p.max_el:.1f}°≥{HIGH_EL_DEG}）峰值 "
+                   f"{khz_min:.2f} kHz/min 不在 Look4Sat 实测带 {BAND_PEAK_KHZ_MIN}")
     if abs(aos_row[3]) < BAND_AOS_RDOT_KMS[0]:
         bad.append(f"AOS 处 |rdot| {abs(aos_row[3]):.2f} km/s < "
                    f"{BAND_AOS_RDOT_KMS[0]}（应接近满值，AOS 不是从 0 涨起来）")

@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 from tkinter import ttk, messagebox
 
 import doppler_core as core
+import radio_proto
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 import sat_freq
@@ -87,6 +88,34 @@ def msg_of(cmd, payload=b""):
     return struct.pack("<HH", cmd, len(payload)) + payload
 
 
+# 能读写多普勒过境表的最低固件 proto（0x076A 回包第一字节）。
+# 6 = 带第二套逻辑页 + 表族命令；比它老的固件没有 0x0760/0x0762/0x0764。
+MIN_PROTO = 6
+
+
+def log_line(tag: str, text: str) -> None:
+    """往 logs/pc-YYYYMMDD.log 落一行（跟着 exe/脚本所在目录走）。
+
+    为什么要有：写表失败时界面上只有最后一句话，而"擦到第几个扇区、第几遍
+    重写、最后在哪个地址不符"这些前因全在滚动发生的瞬间，人一回头就没了。
+    这个文件永不覆盖、永不抛异常 —— 记录失败不能反过来把主流程搞挂。
+    """
+    try:
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "pc-" + datetime.now().strftime("%Y%m%d") + ".log")
+        try:
+            if os.path.getsize(path) > 4 * 1024 * 1024:      # 4 MB 滚动一档
+                os.replace(path, path + ".1")
+        except OSError:
+            pass
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(datetime.now().strftime("%m-%d %H:%M:%S")
+                    + f"  {tag:5s} {text}{chr(10)}")
+    except Exception:
+        pass
+
+
 class Link:
     def __init__(self, port, timeout=1.0):
         self.ser = serial.Serial(port, 38400, timeout=timeout)
@@ -110,11 +139,24 @@ class Link:
         return out
 
     def ask(self, cmd, payload=b"", expect=0, timeout=1.5):
-        """Send one command, return the de-obfuscated reply body.
+        """Send one command, return the reply body (ID + paylen + payload).
 
         The radio frames replies as 0xABCD + len + obfuscated body + footer,
         so the transport header, the body and the footer all have to be peeled
-        off here; everything above this line only deals with plain bytes."""
+        off here; everything above this line only deals with plain bytes.
+
+        FIX(PROTO): `expect` 是**回包 body（内层帧）的字节数**，不是载荷长度。
+        body = ID(2) + paylen(2) + payload，所以 body = 4 + 载荷。
+        以前 erase/write/read 三处传的是载荷长度，各短 4 字节：擦除读出来的
+        r[8] 越界抛 IndexError、写完的状态字节 r[10] 永远取不到（状态检查成了
+        死代码）、回读每轮少 4 字节 —— n 退到 4 之后 r[11:15] 恒空，
+        `while len(out) < length` 就再也出不来，整个"写入电台"流程卡死在
+        busy、UI 永久禁用。详见 proto 报告 A3。
+
+        回包现在还做三件事（以前只验 AB CD 和长度，坏帧会被当成好数据）：
+        ID 必须是 cmd+1、paylen 与 body 长度自洽、CRC16 相符（固件恒填
+        0xFFFF 时按协议跳过，见 radio_proto.py 顶部说明）。
+        """
         # Resynchronise before every command. A reply that arrived late (or a
         # few extra bytes left over from the previous one) would otherwise be
         # parsed as the head of this reply, which is how the header check ended
@@ -134,9 +176,36 @@ class Link:
             hdr = self._read(4, deadline)
             if hdr[0:2] != bytes([0xAB, 0xCD]):
                 raise RuntimeError(f"回包头不对: {hdr.hex()}")
-            n = hdr[2] | (hdr[3] << 8)
-            body = xor_mask(self._read(n, deadline))
-            self._read(4, deadline)      # footer, ignored
+            n = hdr[2] | (hdr[3] << 8)          # body 长度 = 内层 msg 长度
+            # 掩码覆盖 msg + CRC(2)，脚标 DC BA 不在掩码内 —— 这就是以前
+            # "读 n 再读 4 字节脚标"为什么字节数没错、却永远校验不了 CRC 的原因。
+            raw = xor_mask(self._read(n + 2, deadline))
+            body, crc_rx = raw[:n], raw[n] | (raw[n + 1] << 8)
+            foot = self._read(2, deadline)
+            if foot != bytes([0xDC, 0xBA]):
+                raise RuntimeError(f"回包脚标不对: {foot.hex()}")
+            if n < 4:
+                raise RuntimeError(f"回包 body 太短: {n} 字节 {body.hex()}")
+            rid = body[0] | (body[1] << 8)
+            if rid != ((cmd + 1) & 0xFFFF):
+                raise RuntimeError(
+                    f"回包 ID 0x{rid:04X} 不是 0x{(cmd + 1) & 0xFFFF:04X}"
+                    f"（发的 0x{cmd:04X}）body={body.hex()}"
+                )
+            paylen = body[2] | (body[3] << 8)
+            if 4 + paylen > n:
+                raise RuntimeError(
+                    f"回包 paylen={paylen} 与 body 长度 {n} 矛盾 body={body.hex()}"
+                )
+            if crc_rx != 0xFFFF and crc_rx != crc16(body):
+                raise RuntimeError(
+                    f"回包 CRC 不符 收 0x{crc_rx:04X} 算 0x{crc16(body):04X}"
+                )
+            if n != expect:
+                # 只在"比预期短"时算错：固件若多给字段（向前兼容）不该判失败。
+                raise RuntimeError(
+                    f"回包长度 {n} 少于预期 {expect}（0x{cmd:04X}）body={body.hex()}"
+                )
             return body
         except Exception:
             # A late or partial reply must never be parsed as the next one.
@@ -148,8 +217,29 @@ class Link:
             raise
 
     # Reply layouts (see App/app/uart.c): Header(4) + Address(4) + [Size(2)] + Status(1) + [Data]
+    # FIX(PROTO): 下面三处 expect 一律写成 body 长度 = 4 + 载荷长度。
+    def hello(self):
+        """0x076A/0x076B → (proto, state, phase)。
+
+        写表前必须先握一次手：不握手就擦，等于拿"串口能打开"当"这台机器
+        是带多普勒表固件"的证据。回包 body 恒 7 字节（uart.c 的 0x076B，
+        App 侧 fwInfo 的 expect 也是 7，动它会连连接都保不住）。
+        """
+        r = self.ask(0x076A, b"", 7)
+        return r[4], r[5], r[6]
+
+    def fw_tag(self):
+        """0x0772/0x0773 → 固件标识 dict（老固件不认这条命令，返回 None）。"""
+        try:
+            # 载荷 12 字节（Ver[8]+Ppm+PpmMax+Proto+Phase，uart.c:1529-1542），
+            # 回包 body = 4 + 12 = 16，载荷从 r[4:] 起。
+            r = self.ask(0x0772, b"", 16)
+        except Exception:
+            return None
+        return radio_proto.parse_fw_tag(r[4:])
+
     def erase(self, addr):
-        r = self.ask(0x0760, struct.pack("<I", addr), 5)
+        r = self.ask(0x0760, struct.pack("<I", addr), 9)      # Addr(4)+Status(1) -> body 9
         if r[8]:
             raise RuntimeError(f"擦除失败 0x{addr:06X} code={r[8]}")
         time.sleep(0.06)                 # sector erase needs ~50 ms internally
@@ -169,7 +259,7 @@ class Link:
                 try:
                     r = self.ask(0x0762,
                                  struct.pack("<IH", here, len(chunk)) + chunk,
-                                 expect=7)
+                                 expect=11)      # Addr(4)+Size(2)+Status(1) -> body 11
                     # 固件 uart.c 把这块的编程结果放在回包 body[10]：以前只等
                     # 体长、不看状态字节，写失败只能靠"最后回读不符"暴露，现场
                     # 看到的是"地址对不上"而不是"这块没写进去"（报告 第六部分·回归项 13）。
@@ -202,6 +292,19 @@ class Link:
             r = self.ask(0x0766, struct.pack("<HIH", days, secs, 0), 9)
         if r[8]:
             raise RuntimeError(f"对时失败 code={r[8]}")
+        # 回包里 Seconds 是固件**真正收下**的秒数（uart.c 的 0x0767 载荷）。
+        # 只验 Status 会漏掉两种现场：串口线上字节被吃掉，固件按收到的字节
+        # 算出一个别的秒数，照样返回 Status=0；或者时钟内部钳位没生效。
+        # 两种都会让表里的绝对时间戳整体偏移，而电台屏幕上完全看不出来。
+        # 回显必须等于我们发下去的值。固件 Reply.Seconds 就是入参 secs 原样回显
+        # （uart.c:1647），以前这里只看 Status，于是"电台收下了但时钟没生效"
+        # （例如 DOPPLER_SetClock 内部按年/日钳位、或中途被别的串口命令打断）
+        # 完全看不出来 —— 表面 ✓ 对时成功，实际整张过境表的时间轴整体偏移。
+        back = struct.unpack("<I", r[4:8])[0]
+        if back != secs:
+            raise RuntimeError(
+                f"对时回显不符：发了 {secs} s，电台回 {back} s"
+                f"（差 {back - secs:+d} s）——电台时钟没跟着走")
         return secs
 
     CHUNK = 128      # the radio only ever moves one flash chunk per command
@@ -212,15 +315,22 @@ class Link:
             n = min(self.CHUNK, length - len(out))
             payload = struct.pack("<I", addr + len(out)) + struct.pack("<H", n)
             r = None
+            last = None
             for attempt in range(3):
                 try:
-                    r = self.ask(0x0764, payload, 7 + n)
-                except Exception:
+                    r = self.ask(0x0764, payload, 11 + n)   # Addr(4)+Size(2)+Status(1)+Data(n)
+                except Exception as e:
+                    last = e
                     time.sleep(0.05 * (attempt + 1))
                     continue
                 break
             if r is None:
-                raise TimeoutError(f"回读 0x{addr + len(out):06X} 三次都没回包")
+                # FIX(PROTO): 以前这里一律说"三次都没回包"。真机上最常见的原因
+                # 恰恰是**回了**但字节不对（长度/CRC/ID），把它说成"没回包"会
+                # 把排查方向指错。现在把最后一次的真实原因带上。
+                raise TimeoutError(
+                    f"回读 0x{addr + len(out):06X} 三次都失败：{last}"
+                )
             if r[10]:
                 raise RuntimeError(f"回读失败 0x{addr + len(out):06X} code={r[10]}")
             out += r[11:11 + n]
@@ -1391,28 +1501,46 @@ class Tool(tk.Tk):
         try:
             link = Link(port)
 
-            # Prove the radio is listening before anything is erased: a silent
-            # cable or a COM port held by another program otherwise shows up as
-            # a half-erased table.
+            # ── 0. 握手：先证明对面是"带多普勒表的固件"，再动一个字节 ──
+            # 旧流程拿"串口能打开 + 能读 16 字节"当证据。碰到没刷多普勒固件的
+            # 机器，它是在**擦完扇区之后**才发现 0x0762 没人应答 —— 表已经没了。
             try:
-                link.read(core.TABLE_START, 16)
+                proto, state, phase = link.hello()
             except Exception as e:
                 raise RuntimeError(
-                    f"电台没响应（{e}）——检查 USB 线、端口号，"
-                    f"或者关掉别的占用 {port} 的软件")
+                    f"电台没回应握手（0x076A）：{e} —— 检查 USB 线、端口号，"
+                    f"或者这台机器刷的不是带多普勒功能的固件")
+            if proto < MIN_PROTO:
+                raise RuntimeError(
+                    f"固件 proto={proto} 太老（要 ≥{MIN_PROTO}，带过境表读写），"
+                    f"先刷 v6.3.0 以上的多普勒固件；电台里的旧表没动")
+            # 固件标识只用来"说清是哪台机器"，不参与放行：老固件不认 0x0772
+            # 是常态，不能因为读不到版本就拒绝写表。
+            try:
+                tag = link.fw_tag()
+            except Exception:
+                tag = None
+            self._fw_note = (f" · {tag['ver']} ppm={tag['ppm']:+d}" if tag
+                             else " · 固件标识读不到（老固件）")
+            log_line("HELLO", f"{port} proto={proto} state={state} phase={phase}"
+                              f"{self._fw_note} 表={len(table)}B 扇区={len(sectors)}")
 
             errs = core.validate_table(table)
             if errs:
                 raise RuntimeError("表格自检没通过，已中止（电台里的旧表没动）："
                                    + "；".join(errs[:3]))
 
-            # keep the failure visible: a silent skip meant a stale clock and a
-            # countdown that quietly measured the wrong day
+            # 对时失败就不再往下写：表里的时间戳是相对电台时钟的绝对秒，
+            # 时钟差多少，整张表的过境就整体偏多少 —— 而电台屏幕上看不出
+            # 这件事（它照着自己的钟倒计时）。以前这里只记一句备注继续写，
+            # 结果是"写入成功、过境全错"。宁可在擦除前退出，旧表一根不动。
             try:
                 link.set_clock()
-                self._clock_note = ""
             except Exception as e:
-                self._clock_note = f"（对时失败：{e}）"
+                raise RuntimeError(
+                    f"对时失败，已中止（电台里的旧表没动）：{e}"
+                    f"\n先把电台的日期/时间校准，或在按「写入电台」前确认 "
+                    f"{port} 只被本程序占用")
             body_len = max(0, len(table) - core.DPH_HDR)
             total = len(sectors) + (body_len + 127) // 128 + 3
             done = [0]
@@ -1422,37 +1550,51 @@ class Tool(tk.Tk):
                 self.after(0, lambda: (self.prog.configure(value=100 * done[0] / total),
                                        self.lbl_status.config(text=text, fg=DIM)))
 
-            for a in sectors:
-                link.erase(a)
-                tick(f"擦除 0x{a:06X}")
-            tick("擦除完成")
-
-            # link.write() chunks in 128-byte pieces and reads each one back
-            # before moving on, so a failure raises right here with the address.
+            # ── 1. 擦 + 写 + 整表回读，最多两遍 ────────────────────────
+            # 一页一页写、一页一页回读只能保证"这一页当场对了"。真机上出现过
+            # 40 KB 写完、表头也对，整段样点却是 0xFF（擦除与写入之间的 WIP
+            # 竞争）—— 逐页回读全过，电台照样按垃圾样点乱调频。
+            # 所以收尾必须**整表**回读比对；不一致就整表重写一遍（擦除幂等），
+            # 仍不一致才报错，并报出第一个不同的地址。
             #
-            # 顺序很重要：先样点、最后 16 字节表头。以前从偏移 0 顺序写，
-            # 表头先落盘、样点最后，40 KB 中途掉线就留下一张
-            # "magic/版本/count 全合法 + 样点全是垃圾"的半表 —— 电台会
-            # 认下这张表，然后按 count 去读垃圾样点，整场都在乱调频。
-            # 现在表头没落盘之前，那 16 字节是擦除后的 0xFF，固件只会报
-            # NO TABLE，不会装作有一张好表。
-            if body_len:
-                link.write(core.TABLE_START + core.DPH_HDR, table[core.DPH_HDR:])
-                tick(f"写入样点 {body_len} 字节")
-            link.write(core.TABLE_START, table[:core.DPH_HDR])
-            tick(f"写入表头 {core.DPH_HDR} 字节")
+            # 写入顺序：先样点、最后 16 字节表头。表头没落盘之前那 16 字节是
+            # 擦除后的 0xFF，固件只会报 NO TABLE，不会装作有一张好表；反过来
+            # 就会留下"magic/count 全合法 + 样点全是垃圾"的半表。
+            attempt = 0
+            while True:
+                attempt += 1
+                for a in sectors:
+                    link.erase(a)
+                    tick(f"擦除 0x{a:06X}" + (f" · 第 {attempt} 遍" if attempt > 1 else ""))
+                tick("擦除完成")
+                if body_len:
+                    link.write(core.TABLE_START + core.DPH_HDR, table[core.DPH_HDR:])
+                    tick(f"写入样点 {body_len} 字节")
+                link.write(core.TABLE_START, table[:core.DPH_HDR])
+                tick(f"写入表头 {core.DPH_HDR} 字节")
 
-            hdr = link.read(core.TABLE_START, 16)
-            if hdr[:4] != b"DPT1":
-                raise RuntimeError(
-                    f"写入完成但表头不对（读到 {hdr[:4].hex()}）："
-                    f"电台里现在是半新半旧的状态，重新写一次即可")
+                bad = self._verify_table(link, table, tick)
+                if bad is None:
+                    break
+                if attempt >= 2:
+                    off, got = bad
+                    raise RuntimeError(
+                        f"整表回读两遍都不符，最后在 0x{core.TABLE_START + off:06X}"
+                        f"（设备 0x{got:02X} ≠ 表 0x{table[off]:02X}）——"
+                        f"电台里现在是一张不可信的表，再写一次；"
+                        f"连续出现就换 USB 线、换口，或降低串口抖动")
+                log_line("RETRY", f"整表回读不符 @0x{core.TABLE_START + bad[0]:06X}"
+                                  f"（设备 0x{bad[1]:02X}），第 {attempt} 遍重写")
+                tick(f"整表回读不符 @0x{core.TABLE_START + bad[0]:06X}，重写一遍")
 
+            log_line("OK", f"写入完成 {len(table)}B / {len(sectors)} 扇区"
+                           f"{self._fw_note}")
             self.after(0, lambda: self.lbl_status.config(
                 text=f"✓ 完成 · {len(table)} 字节 · {len(sectors)} 扇区"
-                     f"{self._clock_note}", fg=ACC))
+                     f"{self._fw_note}{self._clock_note}", fg=ACC))
         except Exception as e:
             msg = str(e)
+            log_line("FAIL", msg.replace(chr(10), " / "))
             self.after(0, lambda: self.lbl_status.config(text=f"✗ {msg}", fg="#d98a5a"))
         finally:
             if link:
@@ -1461,6 +1603,21 @@ class Tool(tk.Tk):
                                    self.btn_write.config(state="normal"),
                                    self.prog.configure(value=0)))
 
+    def _verify_table(self, link, table, tick):
+        """整表回读比对。None = 全对；否则 (首个不符偏移, 设备字节)。"""
+        step = 512
+        for off in range(0, len(table), step):
+            want = table[off:off + step]
+            got = link.read(core.TABLE_START + off, len(want))
+            if got == want:
+                continue
+            n = min(len(got), len(want))
+            for i in range(n):
+                if got[i] != want[i]:
+                    return off + i, got[i]
+            return off + n, 0xFF
+        tick(f"整表回读 {len(table)} 字节一致")
+        return None
 
 if __name__ == "__main__":
     Tool().mainloop()

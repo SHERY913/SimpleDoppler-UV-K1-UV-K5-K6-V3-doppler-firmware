@@ -1,11 +1,11 @@
 """找电台那个串口，并且说清楚为什么选了它。
 
-MuMu 会把 USB 设备抢进模拟器，宿主这边留下一个 VID 36B7 的虚拟串口：
-它照样能打开，但一个字节也转不过去。所以不能只看"有没有 COMx"，
-得按 VID 排序，把真设备排在前面、把模拟器的虚拟口排到最后。
+这台机器上 MuMu 会插一个 VID 36B7 的虚拟串口进来，所以不能只看 VID：
+实测过 36B7 的口可能就是电台本身（VID 判据不可信），也见过它一个字节都
+不转发的情况。可靠的办法只有一个 —— **打开发一帧 0x076A，看有没有回包**。
 
-    python find_port.py          # 打印候选和选中的口
-    python find_port.py --json   # 给别的脚本用
+     python find_port.py          # 打印候选和选中的口
+     python find_port.py --json   # 给别的脚本用
 """
 
 import json
@@ -13,10 +13,11 @@ import sys
 
 import serial.tools.list_ports as lp
 
-# MuMu / 网易的虚拟串口，看着像设备，实际不转发数据
-VIRTUAL_VIDS = {0x36B7}
+# 以前这里叫 VIRTUAL_VIDS，直接当成"模拟器虚拟口"降权。实测 36B7 的口
+# 照样能跟电台通话，所以只当作"信息"，选口看下面的探针结果。
+SUSPECT_VIDS = {0x36B7}
 
-# 常见 USB 串口芯片，优先级从高到低
+# 常见 USB 串口芯片，只用来显示和排序，不再是唯一判据
 KNOWN = {
     0x1A86: "CH340/CH343",
     0x10C4: "CP210x",
@@ -30,12 +31,10 @@ KNOWN = {
 
 def score(port):
     vid = port.vid or 0
-    if vid in VIRTUAL_VIDS:
-        # 注意：这台机器的电台之前就是从 VID 36B7 这个口通过话的，
-        # 所以不能直接排除，只是排在真芯片后面、并且提示一句。
-        return 5, "疑似模拟器虚拟口(仍会尝试)"
     if vid in KNOWN:
         return 100, KNOWN[vid]
+    if vid in SUSPECT_VIDS:
+        return 40, "VID 36B7(可能是模拟器口，需探针确认)"
     desc = (port.description or "").lower()
     if "serial" in desc or "串行" in desc:
         return 50, "USB 串口"
@@ -52,43 +51,95 @@ def candidates():
     return out
 
 
-# 低于这个分就不要自动选：兜底"未知设备"是 10 分，虚拟口 5 分。
-# 以前 pick() 判的是 score > 0，最低也是 10，于是恒返回第一个口，
-# main() 里"没有可用真串口"的提示永远走不到（报告 第六部分·回归项 4）。
-MIN_SCORE = 50
+def probe(device, timeout=0.8):
+    """发 0x076A，收到 0x076B 就算这台是电台。返回 True/False。"""
+    try:
+        import radio_proto as rp
+        import serial
+        import time
+    except Exception:
+        return False
+    try:
+        s = serial.Serial(device, 38400, timeout=0.05)
+    except Exception:
+        return False
+    try:
+        s.reset_input_buffer()
+        s.write(rp.request_bytes(0x076A))
+        s.flush()
+        buf = b""
+        end = time.time() + timeout
+        while time.time() < end:
+            c = s.read(256)
+            if c:
+                buf += c
+                for r in rp.parse_replies(buf):
+                    rr = r[0] if isinstance(r, list) else r
+                    if rr is not None and rr.cmd == 0x076B:
+                        return True
+            else:
+                time.sleep(0.01)
+        return False
+    except Exception:
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
 
 
-def pick():
-    for c in candidates():
-        if c["score"] >= MIN_SCORE:
+def pick(use_probe=True):
+    """先按芯片排序挑，挑不到就挨个探针；探针通了才敢用。"""
+    cands = candidates()
+    if not cands:
+        return None
+    # 探针优先，分数只用来排顺序。
+    # 以前是"分数够高就直接用"，而 scores 只看 VID/PID —— CH340 全家都是
+    # 1A86:7523，插着鼠标/USB 转 TTL/另一台手台时，分数高的那个可能是错的，
+    # 于是写表写到别的串口上去（真机上表现为"电台没响应"）。
+    # 探针（0x076A 有没有 0x076B 回包）才是"这台设备是手台"的唯一证据。
+    ordered = sorted(cands, key=lambda c: -c["score"])
+    if use_probe:
+        for c in ordered:
+            if probe(c["device"]):
+                return c["device"]
+    for c in ordered:
+        if c["score"] >= 50:
             return c["device"]
-    return None
+    return ordered[0]["device"] if ordered else None
 
 
 def main():
+    if "--only-device" in sys.argv:
+        # 给批处理脚本用：只吐一个设备名（找不到就沉默）。
+        # 老脚本按 VID==0x36B7 硬筛端口，CH340 转接线全是别的 VID，
+        # 于是"手台插着却报找不到端口"。
+        d = pick()
+        if d:
+            print(d)
+        return
     cands = candidates()
     if "--json" in sys.argv:
-        print(json.dumps({"chosen": pick(), "candidates": cands}, ensure_ascii=False))
+        chosen = pick()
+        for c in cands:
+            c["probe"] = probe(c["device"]) if c["device"] != chosen else True
+        print(json.dumps({"chosen": chosen, "candidates": cands}, ensure_ascii=False))
         return
     if not cands:
         print("一个串口都没有。电台插上了吗？驱动装了吗？")
         return
-    for c in cands:
-        mark = "->" if c["device"] == pick() else "  "
-        print(f"{mark} {c['device']:<6} {c['why']:<22} {c['desc']}")
     chosen = pick()
+    for c in cands:
+        mark = "->" if c["device"] == chosen else "  "
+        ok = "探针通" if probe(c["device"]) else "探针无回包"
+        print(f"{mark} {c['device']:<6} {c['why']:<34} {c['desc']}  [{ok}]")
     if chosen:
         print(f"\n用 {chosen}")
     else:
-        # 以前这里永远走不到；现在没有 >= MIN_SCORE 的口才提示，并把候选列出来
-        # 让人自己判断（报告 第六部分·回归项 4）。
-        print(f"\n没有可信的真串口（都低于 {MIN_SCORE} 分），不敢自动选：")
-        for c in cands:
-            print(f"   {c['device']:<6} {c['score']:>3} 分  {c['why']}")
-        print("常见原因：设备被 MuMu 的虚拟口抢走了。")
-        print("在 MuMu 的 USB/设备面板里把这台电台断开（或直接关掉模拟器），")
-        print("Windows 就会重新出现一个 COM 口，再跑一次这个脚本；")
-        print("也可以在 doppler_tool.py 的下拉框里手动指定。")
+        print("\n没有哪个口回 0x076B，不敢自动选：")
+        print("常见原因：① 电台没开机 / 不在 UART 模式；② 口被 MuMu 抢走且不转发；")
+        print("③ 波特率不对（本固件固定 38400）。可在 doppler_tool.py 下拉框里手动指定。")
 
 
 if __name__ == "__main__":
