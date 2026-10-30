@@ -23,3 +23,16 @@ reverse/look4sat.apk
 
 # 我自己调试时 dump 的界面树，不是项目产物
 _ui_dump.txt
+
+# PC 工具跑起来自己落的本机产物，既不是数据也不是代码
+#   logs/ 是每次连真机的运行日志
+#   celestrak_down.flag 记录"这个源刚才挂了"，属运行时状态
+#   table_backup.bin 是从电台读回来的表转储，随时能再读一遍
+PC工具/多普勒工具/logs/
+PC工具/多普勒工具/celestrak_down.flag
+PC工具/多普勒工具/table_backup.bin
+verify/bridge.log
+
+# Look4Sat 路线已搁置，反编译出的 824 KB 混淆 java 是派生产物；
+# 分析脚本（reverse/*.py）和结论（文档/历史/外部参考-Look4Sat.md）都留着
+reverse/look4sat-decompiled/
