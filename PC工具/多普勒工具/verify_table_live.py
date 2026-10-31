@@ -9,7 +9,7 @@
     条目 40 B   name[16] freq10(u32) sample_off(u32) up10(u32) aos2(u16)
                 dur(u16) pts(u16) step_ms(u16) ctcss10(u8) dayoff(u8) max_el(u8)
                 —— 注意第三字段是**采样区偏移**，不是 NORAD。
-    采样区      从 DPH_BASE+0x3000 起，每条 6 B：int16 偏移Hz + u8 仰角
+    采样区      从 DPH_BASE+0x1000 起，每条 6 B：int16 偏移Hz + u8 仰角
                 + u16 斜距km + int8 变化率 0.1km/s
 
     python verify_table_live.py                  # 自动找口（桥接开着会占住串口，先关）
@@ -35,8 +35,23 @@ DPH_BASE = 0x00162000
 DPH_HDR = 16
 DPH_ENTRY = 40
 DPH_ENTRY_MAX = 255
-DPH_SAMPLE_OFF = 0x3000
-DPH_REGION = 0x9D000
+DPH_SAMPLE_OFF = 0x1000
+DPH_REGION = 0x10000         # 0x162000..0x172000 (64 KiB)
+DPH_STEP_MS_MIN = 5000       # 与 doppler.h 的 DPH_STEP_MS_MIN 同一个数
+
+# 这两行以前是手抄的副本：表区从 496 KiB 收到 32 KiB 时忘了改，回读校验
+# 就按错的边界判（超出 32 KiB 的样点被判成"越界"，而其实好着）。
+# 现在 import 得到 doppler_core 就当场对齐一次，对不上直接炸。
+try:
+    import doppler_core as _core
+except Exception:                                    # noqa: BLE001
+    _core = None
+if _core is not None:
+    assert (_core.DPH_BASE, _core.DPH_REGION, _core.DPH_STEP_MS_MIN) == \
+           (DPH_BASE, DPH_REGION, DPH_STEP_MS_MIN), (
+        "本文件抄的常量与 doppler_core 不一致："
+        f"{(DPH_BASE, DPH_REGION, DPH_STEP_MS_MIN)} vs "
+        f"{(_core.DPH_BASE, _core.DPH_REGION, _core.DPH_STEP_MS_MIN)}")
 DPH_VERSION = 5
 SAMPLE_SIZE = 6
 
@@ -206,8 +221,9 @@ def main():
             errs.append("第 %d 条时长 %d s 不可用（固件 16 位定点插值上限 4290 s）" % (i + 1, dur))
         if pts == 0:
             errs.append("第 %d 条没有采样点" % (i + 1))
-        if not (500 <= step <= 60000):
-            errs.append("第 %d 条采样间隔 %d ms 不合理" % (i + 1, step))
+        if not (DPH_STEP_MS_MIN <= step <= 60000):
+            errs.append("第 %d 条采样间隔 %d ms 不合理（固件要求 ≥ %d）"
+                        % (i + 1, step, DPH_STEP_MS_MIN))
         lo = DPH_BASE + DPH_SAMPLE_OFF
         hi = DPH_BASE + DPH_REGION
         if not (lo <= soff < hi) or soff + pts * SAMPLE_SIZE > hi:

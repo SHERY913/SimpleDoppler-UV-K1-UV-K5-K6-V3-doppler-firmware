@@ -39,8 +39,9 @@ class FakeRadio:
 
     SECTOR = 4096
 
-    # 外部 flash 是 2 MB（py25q16），过境表在 0x162000 起：默认就得覆盖到，
-    # 否则 0x0764 回读越界、假电台只回 7 字节，测试会伪装成"协议不符"。
+    # 外部 flash 是 2 MB（py25q16），过境表在 0x162000 起（表区 64 KiB）：
+    # 假电台的 flash 必须覆盖到，否则 0x0764 回读越界、只回 7 字节，
+    # 测试会伪装成"协议不符"。
     def __init__(self, size=0x200000):
         self.flash = bytearray(b"\xFF" * size)
         self.rx = bytearray()          # 待被客户端读走的字节
@@ -54,6 +55,11 @@ class FakeRadio:
         self.state = 0
         self.phase = 2
         self.ppm = 3                   # 0x0772 回包里的实测 ppm（有符号）
+        self.unlock_credits = 0        # 0x0776 借出的擦除额度（固件在 RAM 里存）
+        # 假电台认的令牌在**构造时**取一次快照：测试里改 doppler_tool.UNLOCK_TOKEN
+        # 只想改"客户端发的值"，不想连"固件认的值"一起改掉（那样永远测不出错令牌）。
+        import doppler_tool as _dt0
+        self.expect_token = _dt0.UNLOCK_TOKEN
         self.flash_drop = set()        # 这些偏移"写不进去"（复现 WIP 竞争）
 
     # ── serial 接口 ────────────────────────────────────────────────
@@ -125,6 +131,15 @@ class FakeRadio:
             tag = b"v6.3.0".ljust(8, bytes([0])) + bytes([self.ppm & 0xFF,
                                                       76, self.proto, self.phase])
             self._reply(0x0773, tag)
+        elif cmd == 0x0776:
+            # 受控清地：令牌对才借额度（固件 doppler.c 的 DPH_UnlockRegion）。
+            # 令牌从 doppler_tool 里取，不在测试里再抄一份 —— 抄一份就等于
+            # 让"两端同一个数"这件事失去检验意义。
+            want = struct.unpack("<I", p[0:4])[0] if len(p) >= 4 else 0
+            if want == self.expect_token:
+                self.unlock_credits = 64
+            self._reply(0x0777,
+                        bytes(p[0:4]).ljust(4, bytes([0])) + bytes([self.unlock_credits]))
         elif cmd == 0x0766:
             days, secs = struct.unpack("<II", p[0:8])
             self.clock = (days, secs)
@@ -212,10 +227,28 @@ def main():
         check("set_clock 回显偏差必须报错", "回显不符" in str(e), str(e))
     fake.clock_shift = 0
 
+    # 6 解锁（0x0776/0x0777）：令牌错 → 额度 0；令牌对 → 借出额度。
+    # 这条通道是"在原厂机器上第一次装表"的唯一正路，令牌两端必须同一个数，
+    # 所以这里既测回包长度，也测"错令牌一个额度都不给"。
+    real_tok = dt.UNLOCK_TOKEN
+    try:
+        dt.UNLOCK_TOKEN = 0x12345678
+        tok_bad, credits_bad = link.unlock_region()
+        check("令牌不对 → 回显令牌、额度 0",
+              tok_bad == 0x12345678 and credits_bad == 0,
+              f"token=0x{tok_bad:08X} credits={credits_bad}")
+    finally:
+        dt.UNLOCK_TOKEN = real_tok
+
+    tok_ok, credits_ok = link.unlock_region()
+    check("令牌对 → 借出额度、回显令牌",
+          tok_ok == dt.UNLOCK_TOKEN and credits_ok > 0,
+          f"token=0x{tok_ok:08X} credits={credits_ok}")
+
     print("== 坏帧必须被拒（以前会被当成好数据） ==")
     fake.corrupt_next = True
     try:
-        link.erase(0x3000)
+        link.erase(core_start())
         check("CRC 坏掉要报错", False, "竟然通过了")
     except RuntimeError as e:
         check("CRC 坏掉要报错", "CRC" in str(e), str(e))

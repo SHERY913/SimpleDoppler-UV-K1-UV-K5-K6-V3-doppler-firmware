@@ -110,6 +110,10 @@ def msg_of(cmd, payload=b""):
 # 6 = 带第二套逻辑页 + 表族命令；比它老的固件没有 0x0760/0x0762/0x0764。
 MIN_PROTO = 6
 
+# 0x0776 的解锁令牌，必须与固件 doppler.h 的 DPH_UNLOCK_TOKEN 一模一样
+# （"DPU1" 的小端整数）。verify_three_way.py 会同时读两边比一次。
+UNLOCK_TOKEN = 0x31555044
+
 
 def log_line(tag: str, text: str) -> None:
     """往 logs/pc-YYYYMMDD.log 落一行（跟着 exe/脚本所在目录走）。
@@ -220,6 +224,22 @@ class Link:
                     f"回包 CRC 不符 收 0x{crc_rx:04X} 算 0x{crc16(body):04X}"
                 )
             if n != expect:
+                # 0x0764 的"拒绝"回包：固件回 11 字节（ID 2 + Size 2 +
+                # Addr 4 + Size=0 + Status=1），Status=1 表示它不认这个地址
+                # ——uart.c 里是 `len > PY25Q16_RAW_CHUNK_SIZE || !DPH_TableRangeOk()`。
+                # 这不是链路坏了，最常见的原因是**电台固件比 PC 工具老**：
+                # 表区 32 KiB（止于 0x16A000）的固件读到 0x16A000 就拒不认账，
+                # 而新工具一上来就整块探测 64 KiB。以前这里只说"回包长度 11
+                # 少于预期 139"，谁看了都以为是串口掉字节。
+                if cmd == 0x0764 and n == 11 and body[10]:
+                    raddr = struct.unpack("<I", body[4:8])[0]
+                    rst = body[10]
+                    raise RuntimeError(
+                        f"电台拒读 0x{raddr:06X}（Status={rst}，回包 Size=0）："
+                        f"这个地址不在电台认识的表区里。多半是电台固件还是旧版"
+                        f"（表区 32 KiB，止于 0x16A000），先用 104,288 B / "
+                        f"md5 b48ffb57 那个 f4hwn.sstv.doppler.bin 刷新固件再写表。"
+                    )
                 # 只在"比预期短"时算错：固件若多给字段（向前兼容）不该判失败。
                 raise RuntimeError(
                     f"回包长度 {n} 少于预期 {expect}（0x{cmd:04X}）body={body.hex()}"
@@ -255,6 +275,17 @@ class Link:
         except Exception:
             return None
         return radio_proto.parse_fw_tag(r[4:])
+
+    def unlock_region(self):
+        """0x0776/0x0777 → 借出"允许擦除表区里别人的扇区"的额度。
+
+        返回 (回显的令牌, 剩余额度)。额度为 0 表示固件没认（老固件不实现
+        这条命令、或令牌不对）。额度在固件 RAM 里，掉电清零 —— 每次上电
+        都要重新借一次，这是故意的：不搞"开一次永久畅通"。
+        """
+        r = self.ask(0x0776, struct.pack("<I", UNLOCK_TOKEN), 9)  # Token(4)+Credits(1)
+        token = struct.unpack_from("<I", r, 4)[0]
+        return token, r[8]
 
     def erase(self, addr):
         r = self.ask(0x0760, struct.pack("<I", addr), 9)      # Addr(4)+Status(1) -> body 9
@@ -468,13 +499,22 @@ class Tool(tk.Tk):
         # （Geo.StationStore 用 NaN 表示未设、verify_layout 禁止硬编码坐标），
         # 这条把 PC 工具纳进同一条口径。
         base = {"lat": "", "lon": "", "days": 3, "min_el": 10.0,
-                "step": 1.0, "norad": 25544, "port": "", "fav": [25544],
+                "step": 10.0, "norad": 25544, "port": "", "fav": [25544],
                 "freq": {}}
         try:
             with open(CONFIG, encoding="utf-8") as f:
                 base.update(json.load(f))
         except Exception:
             pass
+        # 旧配置里存着 step=1.0 那种"密采样"的值。表区收到 32 KiB 以后，
+        # 固件对 <10 s 的表是整张拒收的，所以这里把老值就地抬到合法下限，
+        # 而不是等他点"重新计算"才弹一个看不懂的错。
+        try:
+            floor_s = core.DPH_STEP_MS_MIN / 1000.0
+            if float(base.get("step", floor_s)) < floor_s:
+                base["step"] = max(floor_s, core.DPH_STEP_S_DEFAULT)
+        except (TypeError, ValueError):
+            base["step"] = core.DPH_STEP_S_DEFAULT
         return base
 
     def save_cfg(self):
@@ -755,6 +795,17 @@ class Tool(tk.Tk):
         self.btn_qclear.pack(side="left")
 
         tk.Frame(line2, bg=LINE, width=1, height=24).pack(side="left", padx=18)
+
+        # 表区在原厂镜像上切在语音包中间，第一次装表必然撞上固件的防呆。
+        # 这个勾选框就是"我明确知道要清掉那块地"的唯一入口：默认不勾，
+        # 勾了才允许发 0x0776 借额度。放在按钮左边，不与按钮连点。
+        self.var_unlock = tk.BooleanVar(value=False)
+        self.chk_unlock = tk.Checkbutton(
+            line2, text="允许清空被占的表区", variable=self.var_unlock,
+            bg=BG, fg=DIM, selectcolor="#2f3538", bd=0, highlightthickness=0,
+            activebackground=BG, activeforeground=FG,
+            font=("Microsoft YaHei UI", 9))
+        self.chk_unlock.pack(side="left", padx=(0, 2))
 
         self.btn_write = tk.Button(line2, text="写入电台", command=self.write_radio,
                                    bg="#3d6b30", fg="#eaf5e0", bd=0, padx=18, pady=5,
@@ -1251,8 +1302,11 @@ class Tool(tk.Tk):
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             messagebox.showerror("参数", "纬度 -90..90，经度 -180..180")
             return None
-        if step < 0.5:
-            messagebox.showerror("参数", "采样间隔最小 0.5 秒")
+        if step < core.DPH_STEP_MS_MIN / 1000.0:
+            messagebox.showerror("参数",
+                                 f"采样间隔最小 {core.DPH_STEP_MS_MIN // 1000} 秒"
+                                 f"（表区 {core.DPH_REGION // 1024} KiB，"
+                                 f"更密的表固件整张拒收）")
             return None
         if not (1 <= days <= 10):
             messagebox.showerror("参数", "天数 1..10")
@@ -1523,21 +1577,36 @@ class Tool(tk.Tk):
             messagebox.showerror("表格", f"{type(e).__name__}: {e}")
             return
 
-        sectors = core.erase_plan(len(table))
-        for a in sectors:
-            core.guard(a, core.DPH_SECTOR)
-        for i in range(len(table) // core.DPH_SECTOR + 1):
-            core.guard(core.TABLE_START + i * core.DPH_SECTOR, core.DPH_SECTOR)
+        # guard 之前裸写在 Tk 回调里：上一版 FLASH_VOICE_PACK 盖住了表区，
+        # guard 抛 ValueError 直接进 Tk 回调被吞掉 —— 现场表现是"点写入电台
+        # 毫无反应，一个字节没写、也没有任何弹窗"。现在两层：常量已改对，
+        # 这里再兜住，万一以后再有人把禁区写歪，至少能看见话。
+        try:
+            sectors = core.erase_plan(len(table))
+            for a in sectors:
+                core.guard(a, core.DPH_SECTOR)
+            for i in range(len(table) // core.DPH_SECTOR + 1):
+                core.guard(core.TABLE_START + i * core.DPH_SECTOR, core.DPH_SECTOR)
+        except Exception as e:
+            messagebox.showerror("表格", f"地址自检没通过，一个字节都没写：{e}")
+            return
 
         # 二次确认：这个按钮一按下去就是擦掉若干个扇区再重写表头，以前它和
         # 「加入待写」紧挨着，误点等于直接毁掉电台里现有的表（U-P-12）。
         # 文案里写清要擦几个扇区、写几段，长过境的插值告警也一并带出来。
         warn = core.validate_warnings(table)
-        msg = (f"将擦除 {len(sectors)} 个扇区（{len(sectors) * 4} KB），"
-               f"写入 {len(table)} 段过境。\n"
+        # 以前这里写的是 len(table) —— 那是**字节数**，184 段表会显示成
+        # "写入 6328 段过境"，谁看了都以为算错了。段数是 len(sel)，字节数
+        # 单独标出来；擦除量写"整块"，因为 erase_plan 就是恒擦满表区。
+        msg = (f"将擦除整块 {len(sectors)} 个扇区（{len(sectors) * 4} KiB），"
+               f"写入 {len(sel)} 段过境（{len(table):,} B）。\n"
                f"卫星：{self.sat.name[:16]}    串口：{port}\n\n"
                "电台里原有的过境表会被整块替换，写入过程中不要断电、不要拔线。\n\n"
                "确定现在写入？")
+        if self.var_unlock.get():
+            msg += ("\n\n已勾选「允许清空被占的表区」：若表区不是多普勒表"
+                    "（例如原厂语音包），会先向固件借一次擦除额度，把那 16 个"
+                    "扇区清空后再写。那块数据不可恢复。")
         if warn:
             msg = "注意：\n· " + "\n· ".join(warn) + "\n\n" + msg
         if not messagebox.askyesno("写入电台 · 确认", msg, default="no"):
@@ -1549,10 +1618,11 @@ class Tool(tk.Tk):
 
         self.busy = True
         self.btn_write.config(state="disabled")
-        threading.Thread(target=self._writer, args=(port, table, sectors),
+        threading.Thread(target=self._writer,
+                         args=(port, table, sectors, bool(self.var_unlock.get())),
                          daemon=True).start()
 
-    def _writer(self, port, table, sectors):
+    def _writer(self, port, table, sectors, allow_unlock=False):
         link = None
         self._clock_note = ""
         try:
@@ -1586,6 +1656,33 @@ class Tool(tk.Tk):
             if errs:
                 raise RuntimeError("表格自检没通过，已中止（电台里的旧表没动）："
                                    + "；".join(errs[:3]))
+
+            # ── 0.5 归属探测：擦第一个扇区之前，先把整块表区读回来认主 ──
+            # 固件在擦除命令里也会逐个扇区判（DPH_TableErase），但那个判断
+            # 发生在"已经擦掉前面几个扇区之后"——一旦中途拒写，电台里留下的是
+            # 半张表。这里先整块读回来（表区 16 个扇区、64 KiB，
+            # 512 B 一帧是 128 次往返，16 秒上下 —— 比擦完再发现的代价小得多），
+            # 有问题就一个字节都不动地退出，并说清是谁占着。
+            classes = self._probe_region(link)
+            why = core.occupied_reason(classes)
+            if why:
+                # 用户显式勾了"允许清空被占的表区"才走这条：先借额度，
+                # 借不到（老固件/令牌不对）就原样退出，一个字节不动。
+                if not allow_unlock:
+                    raise RuntimeError(
+                        "表区被人占着，已中止（一个字节都没动）：" + why +
+                        "\n\n要在这个位置装表，勾上写表按钮左边的"
+                        "「允许清空被占的表区」再点一次（那块数据不可恢复），"
+                        "或者先跑 clear_table.py --yes。")
+                token, credits = link.unlock_region()
+                if credits == 0:
+                    raise RuntimeError(
+                        "固件不认这次解锁（0x0776 没应答或令牌不符），已中止："
+                        "一个字节都没动。\n这台机器的固件不支持受控清地，"
+                        "先刷本轮固件，或用旧版 clear_table.py --yes。")
+                log_line("UNLOCK", f"token=0x{token:08X} credits={credits} "
+                                   f"表区将被清空后重写")
+            log_line("PROBE", " ".join(f"0x{a:06X}:{c}" for a, c in classes))
 
             # 对时失败就不再往下写：表里的时间戳是相对电台时钟的绝对秒，
             # 时钟差多少，整张表的过境就整体偏多少 —— 而电台屏幕上看不出
@@ -1659,6 +1756,15 @@ class Tool(tk.Tk):
             self.after(0, lambda: (setattr(self, "busy", False),
                                    self.btn_write.config(state="normal"),
                                    self.prog.configure(value=0)))
+
+    def _probe_region(self, link):
+        """把整块表区读回来分三类。32 KiB / 512 B 一帧 = 64 次往返。"""
+        blob = bytearray()
+        step = 512
+        for off in range(0, core.DPH_REGION, step):
+            n = min(step, core.DPH_REGION - off)
+            blob += link.read(core.TABLE_START + off, n)
+        return core.classify_region(bytes(blob))
 
     def _verify_table(self, link, table, tick):
         """整表回读比对。None = 全对；否则 (首个不符偏移, 设备字节)。"""

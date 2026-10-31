@@ -28,16 +28,32 @@ DPH_BASE = 0x00162000
 DPH_VERSION = 5
 DPH_HDR = 16
 DPH_ENTRY = 40
+DPH_PT = 6                 # 一个样点：int16 偏移 + u8 仰角 + u16 斜距 + int8 变化率
 DPH_ENTRY_MAX = 255        # 表头 count 是 u8，256 会直接 struct.error
-DPH_SAMPLE_OFF = 0x3000        # past 256 entries x 40 B, so a big table cannot overwrite samples
+DPH_SAMPLE_OFF = 0x1000        # 表头区留一整个扇区：样点从第二扇区起
 DPH_SECTOR = 0x1000
-DPH_REGION = 0x7C000          # 0x162000..0x1DE000 (496 KiB)，见下面的断言
+# 64 KiB：0x162000..0x172000。下沿是 APP_SLOT_BASE(48) = 0x102000 + 48*0x2000
+# （app_overlay.h），上沿离汉化包 16x16 字库（0x180000）还留 56 KiB 缓冲，
+# 这一段在汉化镜像里实测全 0xFF（0/122,880 个非 FF 字节）。原厂镜像上这
+# 64 KiB 正落在 A-law 语音包中段 —— 那段语音是用户决定放弃的（密度换精度）。
+DPH_REGION = 0x10000         # 0x162000..0x172000 (64 KiB)，见下面的断言
 SONIC_RESERVE_BASE = 0x1DE000  # mb_flash.h：这以上归 Sonic 4K 互操作保留区
 # 一次最多写几趟。255 只是 count 那个 u8 的格式上限，不是"放得下"：
-# 典型 LEO 过境（13 min / 2 s 采样 = 391 点）一条要 2386 B，255 条 = 606 KiB，
-# 比收缩后的表区 496 KiB 还大。与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX
-# 同一个数，verify_three_way.py 当场比。
-DPH_PASS_MAX = 64
+# 最坏情况 30 条 × (40 B 头 + 301 个样点 × 6 B) = 55,380 B（1,500 s 按 5 s
+# 栅格是 301 个点，不是 300 —— 少算一个点就是 30×6 = 180 B 的假余量），
+# 再加 4 KiB 样点起始偏移 = 59,492 B ≤ 65,536 B（余 6,044 B）。实际一天
+# 30 趟、每趟 650 s 上下只要 ~29 KiB，剩下的是给 1,500 s 极端值的余量。
+# 与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX 同一个数，verify_three_way.py 当场比。
+DPH_PASS_MAX = 30
+# 样点栅格。固件侧 DPH_OffsetAt() 本来就是线性插值，所以把 1 s 改成 10 s
+# 只是少存点、不改算法：437.8 MHz 多普勒二阶导峰值约 0.5 Hz/s²，
+# 10 s 栅格插值误差 ≈ |f''|h²/8 ≈ 6 Hz，比未校准 76 ppm 的 33 kHz 小三个数量级。
+# 样点栅格下限。固件 DPH_LoadEntry 拒收比这更密的表：5 s 栅格插值误差
+# ≈ |f''|h²/8 ≈ 1.6 Hz（10 s 时是 6 Hz），都远小于 2.5 kHz 的 NFM 信道，
+# 所以下限放开到 5 s，让 64 KiB 表区能用密度换精度；默认仍按 10 s 采样。
+DPH_STEP_MS_MIN = 5000         # 固件 DPH_LoadEntry 拒收比这更密的表
+DPH_STEP_S_DEFAULT = 10.0
+DPH_DUR_S_MAX = 1500           # 固件容量断言里的那个上限，两边必须一致
 
 # 擦除范围是从 DPH_REGION 推导的（erase_plan 的上限就是表区扇区数），
 # 所以表区声明越界 = 真的会去擦保留区，而扇区擦除不可恢复。
@@ -47,12 +63,38 @@ DPH_PASS_MAX = 64
 assert DPH_BASE + DPH_REGION <= SONIC_RESERVE_BASE, (
     f"表区 0x{DPH_BASE:06X}+0x{DPH_REGION:X} 越进 Sonic 4K 保留区 "
     f"(0x{SONIC_RESERVE_BASE:06X})；收缩 DPH_REGION，别动保留区那条线")
+assert DPH_SAMPLE_OFF % DPH_SECTOR == 0 and DPH_REGION % DPH_SECTOR == 0, (
+    "表区/表头区必须是整扇区，否则擦除计划会在扇区中间切一刀")
+# 表区上沿还有一道"别人的资产"：汉化包 16x16 字库起于 0x180000
+# （doppler.h DPH_CN_ASSET_BASE）。这条是固件那条 _Static_assert 的镜像。
+_CN_ASSET_BASE = 0x180000
+assert DPH_BASE + DPH_REGION <= _CN_ASSET_BASE, (
+    f"表区 0x{DPH_BASE:06X}+0x{DPH_REGION:X} 越过汉化字库起点 "
+    f"0x{_CN_ASSET_BASE:06X}；收缩 DPH_REGION")
+
+# 样点数 = floor(dur/step) + 1（0, 5, ..., 1500 是 301 个点，不是 300）。
+# 两边一起少算一个点，回归就会一起绿 —— 上一版真的就是这样。
+_CAP = DPH_HDR + DPH_PASS_MAX * (
+    DPH_ENTRY + (DPH_DUR_S_MAX * 1000 // DPH_STEP_MS_MIN + 1) * DPH_PT)
+assert _CAP <= DPH_REGION, (
+    f"{DPH_PASS_MAX} 条过境在 {DPH_STEP_MS_MIN} ms 栅格下要 {_CAP} B，"
+    f"而表区只有 {DPH_REGION} B；加大 DPH_REGION 或减少条数")
 
 # Where things live on the 2 MiB external flash. Nothing here is allowed to
-# touch anything but TABLE region - the firmware slots (0x020000..0x0C0000) and
-# the overlay app slots (0x102000..0x162000) are strictly off limits.
+# touch anything but TABLE region - the firmware slots (0x020000..0x0C0000),
+# and everything from 0x102000 up to our table base. That stretch is the stock
+# A-law voice pack (0x102000..0x196510, 8 kHz mono, 607,504 B ≈ 76 s) on a
+# factory image, or 40 overlay apps + fonts + pinyin index on the Chinese
+# build - either way this tool never owns a byte of it.
 FLASH_FIRMWARE = (0x020000, 0x0A0000)
-FLASH_APP_SLOTS = (0x102000, 0x060000)
+FLASH_APP_SLOTS = (0x102000, 0x060000)   # 48 个 app 槽声明区 0x102000..0x162000
+# 原厂 A-law 语音包 0x102000..0x196510 (607,504 B) 被表区从中间切成两段。
+# 原来写成一段 (0x102000, 0x095000)，于是表区整个落在自己声明的"别人的地盘"
+# 里，guard() 把表区自己的每个地址都拒了 —— 这就是"点写入电台毫无反应"的
+# 真因（异常从 Tk 回调里抛出，窗口程序里没地方印 traceback）。
+# 现在只声明表区两侧的那两段，表区本身不属于任何禁区。
+FLASH_VOICE_HEAD = (0x102000, DPH_BASE - 0x102000)                # ..0x162000
+FLASH_VOICE_TAIL = (DPH_BASE + DPH_REGION, 0x197000 - (DPH_BASE + DPH_REGION))
 TABLE_START = DPH_BASE
 TABLE_END = DPH_BASE + DPH_REGION
 
@@ -400,7 +442,7 @@ class Pass:
 
 
 def find_passes(satrec, gnd, freq_hz, days=3, min_el=10.0,
-                coarse=20.0, step=2.0, max_passes=DPH_PASS_MAX,
+                coarse=20.0, step=DPH_STEP_S_DEFAULT, max_passes=DPH_PASS_MAX,
                 start=None):
     start = start or datetime.now(timezone.utc)
     end = start + timedelta(days=days)
@@ -558,15 +600,21 @@ def validate_table(table):
             errs.append(f"{tag}：下行频率 {f10} 超出范围")
         if up10 and not (1_000_000 <= up10 <= 1_000_000_000):
             errs.append(f"{tag}：上行频率 {up10} 超出范围")
-        # 固件上限是 7200 s（doppler.c 里 dur 的 abs 上限），以前这里卡 3600，
-        # 比固件还严，70° 以上的长过境会被自己的校验拦下来（报告 第六部分·回归项 15）。
-        if not (10 <= dur <= 7200):
-            errs.append(f"{tag}：时长 {dur} 秒不合理（固件允许 10~7200）")
+        # 固件上限是 DPH_DUR_S_MAX（1500 s）：原来那个 7200 是按 496 KiB 表区
+        # 算出来的"防坏线"，32 KiB 里装不下，所以三端一起收到 1500（25 分钟）。
+        # 437.8 MHz 上最长的过境也就 660 s 上下，1500 s 有两倍余量。
+        if not (10 <= dur <= DPH_DUR_S_MAX):
+            errs.append(f"{tag}：时长 {dur} 秒不合理（固件允许 10~{DPH_DUR_S_MAX}）")
         if not (2 <= pts <= 20000):
             errs.append(f"{tag}：采样点 {pts} 个不合理")
             continue
-        if not (100 <= step <= 10000):
-            errs.append(f"{tag}：采样间隔 {step} 毫秒不合理")
+        # 上界只受 u16 限制；装不装得下由下面的样点越界检查算。原来这里把
+        # 下限 10000 顺手写成了上界，等价于"只允许恰好 10 s"，而 build_table
+        # 允许到 65535 —— 于是"构表成功、写表被自己拒"，报错文案还说"要求 ≥"。
+        if not (DPH_STEP_MS_MIN <= step <= 65535):
+            errs.append(f"{tag}：采样间隔 {step} 毫秒不合理"
+                        f"（固件要求 {DPH_STEP_MS_MIN}~65535 ms，即 "
+                        f"{DPH_STEP_MS_MIN / 1000:g}~65.535 s）")
         if el > 90:
             errs.append(f"{tag}：最高仰角 {el}° 不合理")
 
@@ -638,6 +686,16 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
     if not passes:
         raise ValueError("没有过境可写")
 
+    # 固件会拒收比 DPH_STEP_MS_MIN 更密的表（DPH_LoadEntry 的闸门），
+    # 在这里先拦住，而不是写进去让电台整表读不出来。
+    step_ms = int(round(step_s * 1000))
+    if step_ms < DPH_STEP_MS_MIN:
+        raise ValueError(
+            f"采样间隔 {step_s:g} s 太密：固件要求 ≥ {DPH_STEP_MS_MIN / 1000:g} s"
+            f"（表区只有 {DPH_REGION // 1024} KiB，密采样装不下几条过境）")
+    if step_ms > 65535:
+        raise ValueError(f"采样间隔 {step_s:g} s 超出 u16 的 step_ms 范围")
+
     entries = []
     blob = bytearray()
     first = passes[0].aos
@@ -649,6 +707,12 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
         e_freq = int(getattr(p, "freq10", freq10))
         e_up   = int(getattr(p, "up10", up10))
         e_ct   = int(getattr(p, "ctcss10", ctcss10))
+        # 超过 DPH_DUR_S_MAX 的"过境"一定是算错了（固件也按同一个数拒收），
+        # 而且它会把一条条目的样点数顶穿容量断言。
+        if p.duration > DPH_DUR_S_MAX:
+            raise ValueError(
+                f"{getattr(p, 'name', name)} 的过境时长 {p.duration} s 超过 "
+                f"{DPH_DUR_S_MAX} s；检查 TLE 与地面站坐标")
         entries.append(struct.pack(
             "<16sIIIHHHHHBB",
             _pad16(getattr(p, "name", name)),
@@ -659,7 +723,7 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
                + int(tz_hours * 3600)) % 86400) // 2),
             p.duration,
             len(p.samples),
-            int(step_s * 1000),
+            step_ms,
             e_ct,
             # day offset must follow the local calendar, not a 24-hour bucket
             # from the first pass: a pass at 02:18 local can sit in the same UTC
@@ -795,20 +859,73 @@ def guard(addr, length):
         raise ValueError(
             f"拒绝写入：0x{addr:06X}+{length} 超出表格区 "
             f"0x{TABLE_START:06X}..0x{TABLE_END:06X}")
-    for (lo, ln) in (FLASH_FIRMWARE, FLASH_APP_SLOTS):
+    for (lo, ln) in (FLASH_FIRMWARE, FLASH_APP_SLOTS,
+                     FLASH_VOICE_HEAD, FLASH_VOICE_TAIL):
         if addr < lo + ln and addr + length > lo:
-            raise ValueError(f"拒绝写入：与固件/APP 区 0x{lo:06X} 重叠")
+            raise ValueError(f"拒绝写入：与固件/APP/语音包区 0x{lo:06X} 重叠")
     return addr
 
 
 def erase_plan(table_size):
     """How many sectors to wipe before writing.
 
-    Always wipe the whole span the previous table could have occupied, so a
-    shorter new table never leaves stale pass entries behind. Capped at the
-    region size, so it can never creep into the firmware area.
-    """
+    表区是 16 个扇区（64 KiB）、擦一遍一两秒，所以不做"按需少擦"：整块擦掉
+    最干净，不会留下上一轮的旧样点。上限就是表区本身（16），够不着别人的地盘。
+    原来这里是 max(需要扇区, 8) —— 上一版表区只有 4 个扇区时，那个 8 就是
+    "擦到表区外面"的直接来源（先擦后判、越界擦，都是它）。"""
     sectors = table_sectors(DPH_SAMPLE_OFF + table_size)
-    sectors = max(sectors, 8)                  # covers the previous run
+    sectors = max(sectors, DPH_REGION // DPH_SECTOR)
     sectors = min(sectors, DPH_REGION // DPH_SECTOR)
     return [(DPH_BASE + i * DPH_SECTOR) for i in range(sectors)]
+
+
+# ------------------------------------------------------------------ ownership
+# 写表之前先问一句"这块地现在是谁的"。三个状态与固件 doppler.c 的
+# dph_sector_class_t 一一对应：固件在擦除命令里逐个扇区再判一次（那是最后
+# 一道闸），这里判是为了**在擦第一个扇区之前就把人话错误弹出来**，而不是
+# 擦到一半才发现第三扇区是别人的语音包。
+SECTOR_BLANK = "blank"        # 全 0xFF，没人用过
+SECTOR_OURS = "ours"         # 表头扇区的前 4 字节是 DPT1
+SECTOR_FOREIGN = "foreign"    # 既不是空白也不是我们的表
+
+
+def classify_sector(buf, addr):
+    """Classify one 4 KiB sector. Mirrors DPH_ClassifySector() in the firmware."""
+    if len(buf) != DPH_SECTOR:
+        raise ValueError(f"扇区长度 {len(buf)}，应为 {DPH_SECTOR}")
+    if addr == DPH_BASE and buf[:4] == b"DPT1":
+        return SECTOR_OURS
+    return SECTOR_BLANK if buf.count(0xFF) == len(buf) else SECTOR_FOREIGN
+
+
+def classify_region(blob):
+    """[(addr, class), ...] for the whole table region."""
+    n = DPH_REGION // DPH_SECTOR
+    if len(blob) != DPH_REGION:
+        raise ValueError(f"表区回读 {len(blob)} 字节，应为 {DPH_REGION}")
+    return [(DPH_BASE + i * DPH_SECTOR,
+             classify_sector(blob[i * DPH_SECTOR:(i + 1) * DPH_SECTOR],
+                             DPH_BASE + i * DPH_SECTOR))
+            for i in range(n)]
+
+
+def occupied_reason(classes):
+    """None = 可以写；否则返回一句给人看的拒绝理由。
+
+    与固件同一条规则：表头是我们的 → 整段数据都是我们的旧样点，放行；
+    表头空白 → 其它扇区必须也空白（全新的一块地）；表头是别人的 → 一个字节
+    都不许动。第三条是这次真正要防的：表区曾经就压在 A-law 语音包上。
+    """
+    head = classes[0][1]
+    if head == SECTOR_OURS:
+        return None
+    if head == SECTOR_FOREIGN:
+        return (f"0x{DPH_BASE:06X} 现在不是多普勒表，是被别的东西占着的"
+                f"（可能是汉化语音包 / Sonic 镜像 / 别人的固件数据）。"
+                f"这里一擦就不可恢复，所以没有动它一个字节。")
+    for addr, cls in classes[1:]:
+        if cls == SECTOR_FOREIGN:
+            return (f"表头扇区是空的，但 0x{addr:06X} 里有数据 —— 说明这块地"
+                    f"被别的东西切走了一部分，不能整块擦。"
+                    f"没有动它一个字节。")
+    return None
