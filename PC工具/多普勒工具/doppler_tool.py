@@ -1281,7 +1281,7 @@ class Tool(tk.Tk):
         def work():
             ps = core.find_passes(satrec_now, gnd, freq, days=days,
                                   min_el=min_el, step=step,
-                                  max_passes=core.DPH_ENTRY_MAX)
+                                  max_passes=core.DPH_PASS_MAX)
             for one in ps:
                 one.name = sat_now.name[:16]
                 one.norad = sat_now.norad
@@ -1484,8 +1484,8 @@ class Tool(tk.Tk):
         if not sel:
             messagebox.showerror("过境", "一个都没勾选，也还没有待写队列")
             return
-        if len(sel) > core.DPH_ENTRY_MAX:
-            messagebox.showerror("过境", f"最多 {core.DPH_ENTRY_MAX} 段，现在 {len(sel)} 段")
+        if len(sel) > core.DPH_PASS_MAX:
+            messagebox.showerror("过境", f"最多 {core.DPH_PASS_MAX} 段，现在 {len(sel)} 段")
             return
         sel.sort(key=lambda q: q.aos)
 

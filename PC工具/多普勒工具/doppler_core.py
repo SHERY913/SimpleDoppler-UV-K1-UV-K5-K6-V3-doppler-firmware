@@ -31,7 +31,22 @@ DPH_ENTRY = 40
 DPH_ENTRY_MAX = 255        # 表头 count 是 u8，256 会直接 struct.error
 DPH_SAMPLE_OFF = 0x3000        # past 256 entries x 40 B, so a big table cannot overwrite samples
 DPH_SECTOR = 0x1000
-DPH_REGION = 0x9D000          # 0x162000..0x1FF000 (~630 KiB)
+DPH_REGION = 0x7C000          # 0x162000..0x1DE000 (496 KiB)，见下面的断言
+SONIC_RESERVE_BASE = 0x1DE000  # mb_flash.h：这以上归 Sonic 4K 互操作保留区
+# 一次最多写几趟。255 只是 count 那个 u8 的格式上限，不是"放得下"：
+# 典型 LEO 过境（13 min / 2 s 采样 = 391 点）一条要 2386 B，255 条 = 606 KiB，
+# 比收缩后的表区 496 KiB 还大。与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX
+# 同一个数，verify_three_way.py 当场比。
+DPH_PASS_MAX = 64
+
+# 擦除范围是从 DPH_REGION 推导的（erase_plan 的上限就是表区扇区数），
+# 所以表区声明越界 = 真的会去擦保留区，而扇区擦除不可恢复。
+# 原来这里到 0x1FF000，越进 Sonic 保留区 132 KiB。这条断言在每个 import
+# 本模块的工具里都会跑一遍，等价于固件里那条 _Static_assert：
+# 改错了当场炸，而不是等某个人的电台少一个 app 才发现。
+assert DPH_BASE + DPH_REGION <= SONIC_RESERVE_BASE, (
+    f"表区 0x{DPH_BASE:06X}+0x{DPH_REGION:X} 越进 Sonic 4K 保留区 "
+    f"(0x{SONIC_RESERVE_BASE:06X})；收缩 DPH_REGION，别动保留区那条线")
 
 # Where things live on the 2 MiB external flash. Nothing here is allowed to
 # touch anything but TABLE region - the firmware slots (0x020000..0x0C0000) and
@@ -385,7 +400,7 @@ class Pass:
 
 
 def find_passes(satrec, gnd, freq_hz, days=3, min_el=10.0,
-                coarse=20.0, step=2.0, max_passes=DPH_ENTRY_MAX,
+                coarse=20.0, step=2.0, max_passes=DPH_PASS_MAX,
                 start=None):
     start = start or datetime.now(timezone.utc)
     end = start + timedelta(days=days)
@@ -518,8 +533,8 @@ def validate_table(table):
         errs.append(f"表格式版本 {ver}，本工具写的是 {DPH_VERSION}")
     if hdr_size != DPH_HDR:
         errs.append(f"表头长度 {hdr_size}，应为 {DPH_HDR}")
-    if not (1 <= count <= DPH_ENTRY_MAX):
-        errs.append(f"条目数 {count}，必须在 1~{DPH_ENTRY_MAX} 之间")
+    if not (1 <= count <= DPH_PASS_MAX):
+        errs.append(f"条目数 {count}，必须在 1~{DPH_PASS_MAX} 之间")
         return errs
 
     if data_off != TABLE_START + DPH_SAMPLE_OFF:
@@ -580,7 +595,7 @@ def validate_warnings(table):
     try:
         magic, _ver, count, _hdr, _off, _res = struct.unpack_from(
             "<4sBBHII", table, 0)
-        if magic != b"DPT1" or not (1 <= count <= DPH_ENTRY_MAX):
+        if magic != b"DPT1" or not (1 <= count <= DPH_PASS_MAX):
             return out
         if n < DPH_HDR + count * DPH_ENTRY:
             return out
@@ -666,8 +681,11 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
     hdr_date = (((base.year - 2000) & 0x7F) << 9) | ((base.month & 0x0F) << 5) | (base.day & 0x1F)
     # 版本号只能用常量：这里以前写死 5，改 DPH_VERSION 时两边不一致，
     # 写出来的是"头 ver=5 + 新排版条目"，固件按旧格式解析 → 整表错位。
-    if len(entries) > DPH_ENTRY_MAX:
-        raise ValueError(f"过境条目 {len(entries)} 条，表头 count 只有一字节，最多 {DPH_ENTRY_MAX} 条")
+    if len(entries) > DPH_PASS_MAX:
+        raise ValueError(f"过境条目 {len(entries)} 条，超过策略上限 {DPH_PASS_MAX} 条："
+                         f"表区只有 {DPH_REGION // 1024} KiB，而擦除范围就是按表区算的，"
+                         f"写大了会连 Sonic 4K 保留区一起擦掉（不可恢复）。"
+                         f"少选几趟，或改天数/最低仰角把窗口收窄。")
     header = struct.pack("<4sBBHII", b"DPT1", DPH_VERSION, len(entries), DPH_HDR,
                          DPH_BASE + DPH_SAMPLE_OFF, hdr_date)
 

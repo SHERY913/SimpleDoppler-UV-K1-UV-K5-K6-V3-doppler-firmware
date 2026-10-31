@@ -38,6 +38,7 @@ F_SESS_KT = KT / "RadioSession.kt"
 F_MAIN_KT = KT / "MainScreen.kt"
 F_PROTO = HERE / "radio_proto.py"
 F_LAYOUT = FW / "doppler_layout.h"
+F_MB_H = FW.parent / "driver" / "mb_flash.h"   # 外部 flash 布局的权威表
 F_EDITOR = HERE / "layout_editor.html"
 
 BAD: list[str] = []
@@ -155,7 +156,10 @@ def main() -> int:
     # ── 2. 表结构：表头 / 条目 / 样点 ──
     cdef = c_defines(dop_h, ["DPH_BASE_ADDR", "DPH_CAL_ADDR", "DPH_REGION_SIZE",
                              "DPH_HDR_SIZE", "DPH_ENTRY_SIZE", "DPH_PT_SIZE",
-                             "DPH_VERSION", "DPH_VERSION_MIN", "DPH_ENTRY_MAX"])
+                             "DPH_VERSION", "DPH_VERSION_MIN", "DPH_ENTRY_MAX",
+                             "DPH_PASS_MAX"])
+    mb_h = read(F_MB_H)
+    sonic = c_defines(mb_h, ["MB_SONIC_RESERVE_BASE"]).get("MB_SONIC_RESERVE_BASE")
     for label, typedef, py_fmt, kt_lo, kt_hi in (
         ("表头", "dph_header_t", "<4sBBHII", "val head = ByteArrayOutputStream()", "val body ="),
         ("条目", "dph_entry_t", "<16sIIIHHHHHBB", "val e = ByteArrayOutputStream()", "entries.write"),
@@ -192,13 +196,14 @@ def main() -> int:
     # ── 3. flash 地址与尺寸常量 ──
     pydef = {}
     for n in ["DPH_BASE", "DPH_VERSION", "DPH_HDR", "DPH_ENTRY", "DPH_ENTRY_MAX",
-              "DPH_SAMPLE_OFF", "DPH_REGION", "DPH_PT_SIZE"]:
+              "DPH_SAMPLE_OFF", "DPH_REGION", "DPH_PT_SIZE", "DPH_PASS_MAX"]:
         m = re.search(rf"^{n} = (\S+)", core, re.M)
         if m:
             pydef[n] = int(m.group(1).split("#")[0], 0)
     ktdef = {}
     for cn, key in (("BASE", "DPH_BASE_ADDR"), ("SAMPLE_OFF", None), ("HDR", "DPH_HDR_SIZE"),
-                    ("ENTRY", "DPH_ENTRY_SIZE"), ("ENTRY_MAX", "DPH_ENTRY_MAX")):
+                    ("ENTRY", "DPH_ENTRY_SIZE"), ("ENTRY_MAX", "DPH_ENTRY_MAX"),
+                    ("PASS_MAX", None), ("MAX_TABLE_BYTES", None)):
         m = re.search(rf"const val {cn} = (\S+)", pass_kt)
         if m:
             ktdef[cn] = int(m.group(1).rstrip("L"), 0)
@@ -206,8 +211,32 @@ def main() -> int:
     check("表区起始地址", {"固件 DPH_BASE_ADDR": cdef.get("DPH_BASE_ADDR"),
                           "PC DPH_BASE": pydef.get("DPH_BASE"),
                           "App BASE": ktdef.get("BASE")})
-    check("表区容量", {"固件 DPH_REGION_SIZE": cdef.get("DPH_REGION_SIZE"),
-                       "PC DPH_REGION": pydef.get("DPH_REGION")})
+    # 表区容量同时是**擦除上限**：PC 的 erase_plan 与 App 的 sectors() 都从它推导，
+    # 所以这一项不只是"能写多少"，而是"最多敢擦多大"。三端必须一个数。
+    check("表区容量（= 擦除上限）",
+          {"固件 DPH_REGION_SIZE": cdef.get("DPH_REGION_SIZE"),
+           "PC DPH_REGION": pydef.get("DPH_REGION"),
+           "App MAX_TABLE_BYTES": ktdef.get("MAX_TABLE_BYTES")})
+    check("一次最多写几趟",
+          {"固件 DPH_PASS_MAX": cdef.get("DPH_PASS_MAX"),
+           "PC DPH_PASS_MAX": pydef.get("DPH_PASS_MAX"),
+           "App PASS_MAX": ktdef.get("PASS_MAX")})
+    # 擦除不能越进 Sonic 4K 互操作保留区：固件里是 _Static_assert，
+    # 这里再算一遍，防的是"改了 C 的常量、忘了改 Python/Kotlin"这种半拉子。
+    if sonic is None:
+        BAD.append("解析不到 MB_SONIC_RESERVE_BASE —— 布局表被改过？本检查需要更新")
+    else:
+        ends = {"固件": (cdef.get("DPH_BASE_ADDR") or 0) + (cdef.get("DPH_REGION_SIZE") or 0),
+                "PC":   (pydef.get("DPH_BASE") or 0) + (pydef.get("DPH_REGION") or 0),
+                "App":  (ktdef.get("BASE") or 0) + (ktdef.get("MAX_TABLE_BYTES") or 0)}
+        over = {k: v for k, v in ends.items() if v > sonic}
+        if over:
+            BAD.append("表区末尾越进 Sonic 4K 保留区 (0x%06X)：%s"
+                       % (sonic, "; ".join(f"{k} 到 0x{v:06X}" for k, v in over.items()))
+                       + " —— 擦除会踩不可恢复的地盘")
+        else:
+            OK.append("表区末尾 0x%06X 三端一致且不越进 Sonic 4K 保留区 (0x%06X)"
+                      % (ends["固件"], sonic))
     check("表头长度", {"固件": cdef.get("DPH_HDR_SIZE"), "PC": pydef.get("DPH_HDR"),
                        "App": ktdef.get("HDR")})
     check("条目长度", {"固件": cdef.get("DPH_ENTRY_SIZE"), "PC": pydef.get("DPH_ENTRY"),
