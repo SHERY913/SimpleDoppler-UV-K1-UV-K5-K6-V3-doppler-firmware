@@ -439,6 +439,19 @@ def _find_los(satrec, gnd, t0, end):
 
 
 def _measure(satrec, gnd, aos, los, freq_hz, step):
+    # FIX(采样原点三端对齐): 表里的 aos2 只存得下"当天秒数 / 2"，也就是 2 秒
+    # 一格；原来这里从**真实 AOS**（带小数秒）起采，而 build_table 的 aos2 是
+    # 向下取整 —— 于是整条曲线比表记的时刻提前最多 2 s，437.8 MHz 上是 248 Hz。
+    # App 的 PassCalc 早就改成"AOS 四舍五入到偶数秒、样点也从那一秒起采"
+    # （PassCalc.kt:121-124 那段注释就是这条），PC 这一份一直漏着：
+    # 同一颗星同一台站，手机写的表和电脑写的表对不上，谁也不报错。
+    #
+    # 对齐到偶数秒用 UTC 秒数就够 —— 所有时区偏移都是整分钟（偶数秒），
+    # 所以"偶数秒"这个性质与本地/UTC 无关，不必把 tz 传进来。
+    # 挪完再算 aos2 就是精确值，build_table 里那句 //2 不用再改。
+    s = aos.hour * 3600 + aos.minute * 60 + aos.second
+    aos = aos.replace(microsecond=0) + timedelta(seconds=(s % 2))
+
     p = Pass()
     p.aos, p.los = aos, los
     total = (los - aos).total_seconds()

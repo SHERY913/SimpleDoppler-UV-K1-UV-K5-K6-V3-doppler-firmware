@@ -219,7 +219,14 @@ def main() -> int:
 
     # 条数上限：count 是 u8，固件常量写 256 但那条校验已被自标恒假，故只告警不判红
     c_max, p_max, k_max = cdef.get("DPH_ENTRY_MAX"), pydef.get("DPH_ENTRY_MAX"), ktdef.get("ENTRY_MAX")
-    if len({c_max, p_max, k_max}) > 1:
+    # FIX(永绿): 原来只比 len({...}）> 1。三端正则全都失配时三个值都是 None，
+    # {None} 的长度是 1 → 走 else → 打印"条目上限 = None（三端一致）"并且算通过。
+    # 本文件第 14 行自己写的原则是"解析不到 = 报错，绝不静默通过"，
+    # 这条漏了；常量一改名字或换个写法，这一层就悄悄变成一条什么都不看的绿线。
+    if c_max is None or p_max is None or k_max is None:
+        BAD.append(f"条目上限解析失效：固件 {c_max} / PC {p_max} / App {k_max} "
+                   f"—— 常量大概被改名或换了写法，这条检查本身需要更新")
+    elif len({c_max, p_max, k_max}) > 1:
         WARN.append(f"条目上限三端不同口径：固件 {c_max} / PC {p_max} / App {k_max}。"
                     f"固件 hdr.count 是 u8，实际最大 255，行为一致但常量撒谎——"
                     f"要么把固件改成 255，要么在 .h 里注明")

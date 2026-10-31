@@ -171,8 +171,15 @@ def main():
     link.buf = bytearray()
 
     # 1 擦除：body 9，Status 在 body[8]
-    link.erase(0x2000)
-    check("erase 不再抛 IndexError", True)
+    # 原来这里写的是 check("erase 不再抛 IndexError", True) —— 恒真，永远绿。
+    # "崩掉整条脚本"不等于"这条检查存在"：它抓的是回包比 9 字节短时
+    # r[8] 越界，只有把异常接住并如实判红，才能在那种回包真的出现时变红。
+    try:
+        link.erase(0x2000)
+        erase_ok, erase_why = True, ""
+    except Exception as exc:                       # noqa: BLE001 - 就是要接住
+        erase_ok, erase_why = False, repr(exc)
+    check("erase 不再抛 IndexError", erase_ok, erase_why)
     check("擦除后整扇区为 0xFF", bytes(fake.flash[0x2000:0x2000 + 4096]) == b"\xFF" * 4096)
 
     # 2 写入 + 每块回读（Link.write 自带回读比对）
@@ -269,7 +276,11 @@ def main():
           dt.Tool._verify_table(object(), _link_at(fake), tbl, lambda t: None) is None)
 
     print("== expect 语义固定为 body 长度 ==")
-    check("erase 的 expect 是 9", "9)" in open(__file__, encoding="utf-8").read() or True)
+    # 删掉一条永绿断言：原来这里是
+    #   check("erase 的 expect 是 9", "9)" in open(__file__).read() or True)
+    # 两个问题叠在一起 —— `or True` 让它恒真，而它 grep 的是**本文件自己**，
+    # 就算 doppler_tool.py 里的 expect 改了也照绿。下面这条对
+    # dt.Link.erase 真实源码的断言才是有用的那一条。
     import inspect
     src = inspect.getsource(dt.Link.erase)
     check("erase 源码里 expect=9", "9)" in src, src.strip().splitlines()[1])
