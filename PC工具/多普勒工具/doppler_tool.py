@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+import sys
 import threading
 import time
 import tkinter as tk
@@ -20,7 +21,26 @@ from tkinter import ttk, messagebox
 import doppler_core as core
 import radio_proto
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# ---------------------------------------------------------------- 路径的唯一出处
+# 源码运行和打包成 exe 运行，"程序在哪"和"用户数据该写哪"是两回事：
+# PyInstaller 单文件模式每次启动都把内嵌资源解到一个随机命名的临时目录
+# （sys._MEIPASS），退出即删。__file__ 在那里指向的就是这个临时窝，
+# 把配置/缓存/日志写进去等于每次开机失忆，还会在 %TEMP% 里留一堆垃圾。
+# 所以拆成两个：RES_DIR 只读（星图这类随包走的资源），
+# DATA_DIR 可写（配置、TLE 缓存、日志），exe 模式落到 %LOCALAPPDATA%。
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RES_DIR = getattr(sys, "_MEIPASS", SCRIPT_DIR)
+if getattr(sys, "frozen", False):
+    DATA_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+        "F4HWN-Doppler-Tool")
+    os.makedirs(DATA_DIR, exist_ok=True)
+else:
+    DATA_DIR = SCRIPT_DIR
+
+BASE = DATA_DIR
+CONFIG = os.path.join(DATA_DIR, "doppler_tool.json")
+PIC_DIR = os.path.join(RES_DIR, "sat_pics")
 import sat_freq
 from sgp4.api import Satrec
 
@@ -31,9 +51,7 @@ try:
 except Exception:
     HAVE_SERIAL = False
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG = os.path.join(APP_DIR, "doppler_tool.json")
-PIC_DIR = os.path.join(APP_DIR, "sat_pics")
+APP_DIR = DATA_DIR       # 兼容旧引用；路径的唯一出处在上面
 
 BG = "#1e2224"
 FG = "#d9ded9"
@@ -101,7 +119,7 @@ def log_line(tag: str, text: str) -> None:
     这个文件永不覆盖、永不抛异常 —— 记录失败不能反过来把主流程搞挂。
     """
     try:
-        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        d = os.path.join(DATA_DIR, "logs")
         os.makedirs(d, exist_ok=True)
         path = os.path.join(d, "pc-" + datetime.now().strftime("%Y%m%d") + ".log")
         try:
@@ -440,7 +458,13 @@ class Tool(tk.Tk):
 
     # --- config -----------------------------------------------------
     def load_cfg(self):
-        base = {"lat": 43.83, "lon": 87.62, "days": 3, "min_el": 10.0,
+        # 台站默认留空 = 未设置。原来这里写死 43.83 / 87.62（乌鲁木齐），
+        # 后果不是"显示不好看"：所有下次过境、仰角、斜距、多普勒样点都按
+        # 那个坐标算，别人装上直接拿一张按别人城市算的表写进电台，
+        # 而界面一路报成功。App 侧同一个 bug 已经修过并加了自检
+        # （Geo.StationStore 用 NaN 表示未设、verify_layout 禁止硬编码坐标），
+        # 这条把 PC 工具纳进同一条口径。
+        base = {"lat": "", "lon": "", "days": 3, "min_el": 10.0,
                 "step": 1.0, "norad": 25544, "port": "", "fav": [25544],
                 "freq": {}}
         try:
@@ -956,11 +980,22 @@ class Tool(tk.Tk):
         Called from a worker thread by set_sats(): building 96 Satrec objects
         plus a 48 h scan is fast, but doing it inline still froze the window
         for a moment on every TLE refresh."""
+        # 台站没填就不算，也不假装算过。原来这里 float() 失败是静默 return，
+        # 列表空着但一句提示都没有，新装上的人只会得出"这软件打不开数据"的结论。
         try:
-            g = core.Ground(float(self.cfg.get("lat", 43.83)),
-                            float(self.cfg.get("lon", 87.62)))
-        except Exception:
+            g = core.Ground(float(self.cfg.get("lat", "")),
+                            float(self.cfg.get("lon", "")))
+        except (TypeError, ValueError):
+            self.nextp = {}
+            self.station_unset = True
+            try:
+                self.lbl_count.config(text=f"{len(self.sats)} 颗 · 未设台站")
+            except Exception:
+                pass
+            if redraw:
+                self.fill_list()
             return
+        self.station_unset = False
         np_ = {}
         self.np_err = []
         for st in self.sats:
@@ -1189,7 +1224,17 @@ class Tool(tk.Tk):
             min_el = float(self.e_el.get())
             step = float(self.e_step.get())
         except ValueError:
-            messagebox.showerror("参数", "经纬度 / 天数 / 仰角 / 间隔 都填数字")
+            # 台站默认是空的（见 load_cfg），所以新装的人第一次点任何按钮都会走到
+            # 这里。原来一句"都填数字"分不清是"没填"还是"填错了"，
+            # 而这两件事的下一步动作完全不同。
+            if not (self.e_lat.get().strip() and self.e_lon.get().strip()):
+                messagebox.showerror("台站",
+                                     "先填你所在位置的经纬度（十进制度，"
+                                     "如 31.2304 / 121.4737，西经南纬填负数）。\n"
+                                     "过境时刻、仰角、多普勒样点全都按这个坐标算，"
+                                     "不填就没有能写进电台的表。")
+            else:
+                messagebox.showerror("参数", "经纬度 / 天数 / 仰角 / 间隔 都填数字")
             return None
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             messagebox.showerror("参数", "纬度 -90..90，经度 -180..180")
@@ -1620,4 +1665,19 @@ class Tool(tk.Tk):
         return None
 
 if __name__ == "__main__":
-    Tool().mainloop()
+    # 打包成 exe 之后这是窗口程序：起不来时屏幕上什么都不会留，
+    # "双击没反应"分不清是没启动、启动后崩了、还是被杀软拦了。
+    # 所以先落一行"我起来了"（带 Python 版本与数据目录），再把崩溃的
+    # 完整 traceback 写进同一个文件 —— 日志里没有这一行，就等于进程
+    # 从没起来过，对方只需要把 logs\pc-*.log 发回来即可定位。
+    import traceback
+
+    log_line("start", f"F4HWN 多普勒过境表工具 · 打包={getattr(sys, 'frozen', False)}"
+                      f" · py={sys.version.split()[0]} · 数据目录={DATA_DIR}")
+    try:
+        Tool().mainloop()
+    except SystemExit:
+        raise
+    except BaseException:                       # noqa: BLE001 - 就是要兜住所有
+        log_line("fatal", traceback.format_exc())
+        raise
