@@ -1538,10 +1538,47 @@ class Tool(tk.Tk):
         if not sel:
             messagebox.showerror("过境", "一个都没勾选，也还没有待写队列")
             return
-        if len(sel) > core.DPH_PASS_MAX:
-            messagebox.showerror("过境", f"最多 {core.DPH_PASS_MAX} 段，现在 {len(sel)} 段")
-            return
         sel.sort(key=lambda q: q.aos)
+
+        # 条数上限是条目区的物理上限（16 + 102×40 = 0x1000），真正决定
+        # "装不装得下"的是字节数，不是趟数：10 s 一条 946 B、5 s 一条
+        # 1,846 B，同一张 64 KiB 表区能装的趟数差一倍。所以这里按
+        # table_used() 的**实际**占用判，超了就从末尾（最晚的那趟）开始
+        # 去掉，并把具体去掉哪几趟摆给操作员看。
+        if len(sel) > core.DPH_PASS_MAX:
+            messagebox.showerror(
+                "过境", f"超过 {core.DPH_PASS_MAX} 条：条目区只放得下表头 + "
+                        f"{core.DPH_PASS_MAX} 条 40 B 条目（正好填满 4 KiB）。少选几趟。")
+            return
+        keep = core.fit_keep(sel)
+        if keep < len(sel):
+            used = core.table_used(sel)
+            drop = sel[keep:]
+            lines = "\n".join(
+                f"    {q.aos.strftime('%m-%d %H:%M')}  {getattr(q, 'duration', 0)} s"
+                for q in drop[:6])
+            if len(drop) > 6:
+                lines += f"\n    …… 还有 {len(drop) - 6} 趟"
+            msg = (f"这张表要 {used:,} B，表区只有 {core.DPH_REGION:,} B"
+                   f"（{core.DPH_REGION // 1024} KiB），超出 {used - core.DPH_REGION:,} B。\n\n"
+                   f"去掉最后 {len(drop)} 趟就装得下"
+                   f"（剩 {len(sel) - len(drop)} 趟 / {core.table_used(sel[:keep]):,} B）：\n"
+                   f"{lines}\n\n"
+                   f"现在去掉这 {len(drop)} 趟吗？（选「否」可以自己去改天数/仰角/采样间隔）")
+            if not messagebox.askyesno("表格超了", msg):
+                return
+            for q in drop:
+                self.checked.discard(id(q))
+                self.queue = [x for x in self.queue if x is not q]
+            self.queue_update()
+            self.show_passes(self.passes)   # 树里的勾会跟着消掉
+            sel = sel[:keep]
+            self.lbl_status.config(
+                text=f"已去掉 {len(drop)} 趟，现在 {len(sel)} 趟 / "
+                     f"{core.table_used(sel):,} B", fg=ACC)
+            if not sel:
+                messagebox.showerror("过境", "一趟都装不下：把采样间隔调大再试")
+                return
 
         p = self.params()
         if not p:

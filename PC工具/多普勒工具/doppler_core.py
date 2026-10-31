@@ -38,13 +38,18 @@ DPH_SECTOR = 0x1000
 # 64 KiB 正落在 A-law 语音包中段 —— 那段语音是用户决定放弃的（密度换精度）。
 DPH_REGION = 0x10000         # 0x162000..0x172000 (64 KiB)，见下面的断言
 SONIC_RESERVE_BASE = 0x1DE000  # mb_flash.h：这以上归 Sonic 4K 互操作保留区
-# 一次最多写几趟。255 只是 count 那个 u8 的格式上限，不是"放得下"：
-# 最坏情况 30 条 × (40 B 头 + 301 个样点 × 6 B) = 55,380 B（1,500 s 按 5 s
-# 栅格是 301 个点，不是 300 —— 少算一个点就是 30×6 = 180 B 的假余量），
-# 再加 4 KiB 样点起始偏移 = 59,492 B ≤ 65,536 B（余 6,044 B）。实际一天
-# 30 趟、每趟 650 s 上下只要 ~29 KiB，剩下的是给 1,500 s 极端值的余量。
+# 一次最多写几趟。这个数是**条目区**的物理上限，不是"64 KiB 装得下几趟"：
+# 条目从 +16 起、样点从 +0x1000 起，中间 4,080 B，102 条 × 40 B + 16 B
+# 恰好填满那一扇区（16 + 102*40 = 4,096 = DPH_SAMPLE_OFF）。
+#
+# 上一版这里是 30，而且是被"最坏情况"反推出来的：30 条 × (40 B + 301 个
+# 5 s 样点 × 6 B) = 55,380 B 塞进 64 KiB —— 可 10 s 栅格一条只有 946 B，
+# 30 条才 32,492 B，一半表区白扔。条数上限不该由一个最坏步长决定。
+#
+# 现在"这张表装不装得下"按**真实字节**算：table_used() 给出实际占用，
+# fit_keep() 给出从末尾往前最多留几趟；装不下时 GUI 让操作员去掉几趟。
 # 与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX 同一个数，verify_three_way.py 当场比。
-DPH_PASS_MAX = 30
+DPH_PASS_MAX = 102
 # 样点栅格。固件侧 DPH_OffsetAt() 本来就是线性插值，所以把 1 s 改成 10 s
 # 只是少存点、不改算法：437.8 MHz 多普勒二阶导峰值约 0.5 Hz/s²，
 # 10 s 栅格插值误差 ≈ |f''|h²/8 ≈ 6 Hz，比未校准 76 ppm 的 33 kHz 小三个数量级。
@@ -72,13 +77,41 @@ assert DPH_BASE + DPH_REGION <= _CN_ASSET_BASE, (
     f"表区 0x{DPH_BASE:06X}+0x{DPH_REGION:X} 越过汉化字库起点 "
     f"0x{_CN_ASSET_BASE:06X}；收缩 DPH_REGION")
 
-# 样点数 = floor(dur/step) + 1（0, 5, ..., 1500 是 301 个点，不是 300）。
-# 两边一起少算一个点，回归就会一起绿 —— 上一版真的就是这样。
-_CAP = DPH_HDR + DPH_PASS_MAX * (
-    DPH_ENTRY + (DPH_DUR_S_MAX * 1000 // DPH_STEP_MS_MIN + 1) * DPH_PT)
-assert _CAP <= DPH_REGION, (
-    f"{DPH_PASS_MAX} 条过境在 {DPH_STEP_MS_MIN} ms 栅格下要 {_CAP} B，"
-    f"而表区只有 {DPH_REGION} B；加大 DPH_REGION 或减少条数")
+# 容量拆成两条结构性断言，不再拿"最坏情况"反推条数上限
+# （FIX(CAP-BY-BYTES)，与固件 doppler.c 那两条 _Static_assert 一一对应）：
+#   1. 条目区必须正好填满表头那一扇区，多一条就越界写进样点区；
+#   2. 至少一趟满长过境要装得下，否则这套常量根本不可用。
+# 至于"某张表几趟装得下"，按真实字节算 —— 见下面的 table_used() / fit_keep()。
+_ENTRY_AREA = DPH_SAMPLE_OFF - DPH_HDR
+assert DPH_HDR + DPH_PASS_MAX * DPH_ENTRY == DPH_SAMPLE_OFF, (
+    f"{DPH_PASS_MAX} 条 {DPH_ENTRY} B 条目 + {DPH_HDR} B 表头 = "
+    f"{DPH_HDR + DPH_PASS_MAX * DPH_ENTRY} B，不等于样点区起点 "
+    f"0x{DPH_SAMPLE_OFF:X}（{DPH_SAMPLE_OFF} B）；条目区只有 {_ENTRY_AREA} B，"
+    f"最多 {(DPH_SAMPLE_OFF - DPH_HDR) // DPH_ENTRY} 条")
+_WORST_ONE = DPH_SAMPLE_OFF + DPH_ENTRY + (
+    DPH_DUR_S_MAX * 1000 // DPH_STEP_MS_MIN + 1) * DPH_PT
+assert _WORST_ONE <= DPH_REGION, (
+    f"最坏情况的一趟（{DPH_DUR_S_MAX} s @ {DPH_STEP_MS_MIN} ms，"
+    f"{(DPH_DUR_S_MAX * 1000 // DPH_STEP_MS_MIN + 1)} 个点）就要 {_WORST_ONE} B，"
+    f"表区只有 {DPH_REGION} B；加大 DPH_REGION 或降低 DPH_DUR_S_MAX")
+
+
+def table_used(passes):
+    """这张表实际占多少字节，与 build_table 的排版一致（含 4 KiB 样点偏移）。"""
+    return DPH_SAMPLE_OFF + sum(DPH_ENTRY + len(p.samples) * DPH_PT for p in passes)
+
+
+def fit_keep(passes):
+    """从末尾往前丢，最多能留下几趟（至少 1）。0 表示连一趟都装不下。"""
+    used = DPH_SAMPLE_OFF
+    keep = 0
+    for p in passes:
+        cost = DPH_ENTRY + len(p.samples) * DPH_PT
+        if used + cost > DPH_REGION:
+            break
+        used += cost
+        keep += 1
+    return keep
 
 # Where things live on the 2 MiB external flash. Nothing here is allowed to
 # touch anything but TABLE region - the firmware slots (0x020000..0x0C0000),
@@ -746,10 +779,10 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
     # 版本号只能用常量：这里以前写死 5，改 DPH_VERSION 时两边不一致，
     # 写出来的是"头 ver=5 + 新排版条目"，固件按旧格式解析 → 整表错位。
     if len(entries) > DPH_PASS_MAX:
-        raise ValueError(f"过境条目 {len(entries)} 条，超过策略上限 {DPH_PASS_MAX} 条："
-                         f"表区只有 {DPH_REGION // 1024} KiB，而擦除范围就是按表区算的，"
-                         f"写大了会连 Sonic 4K 保留区一起擦掉（不可恢复）。"
-                         f"少选几趟，或改天数/最低仰角把窗口收窄。")
+        raise ValueError(
+            f"过境条目 {len(entries)} 条，超过 {DPH_PASS_MAX} 条 —— 这是条目区的"
+            f"物理上限（{DPH_HDR} B 表头 + {DPH_PASS_MAX}×{DPH_ENTRY} B 条目 = "
+            f"0x{DPH_SAMPLE_OFF:X}），再多一条就压进样点区了。少选几趟。")
     header = struct.pack("<4sBBHII", b"DPT1", DPH_VERSION, len(entries), DPH_HDR,
                          DPH_BASE + DPH_SAMPLE_OFF, hdr_date)
 
@@ -760,9 +793,12 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
     out += blob
 
     if len(out) > DPH_REGION:
+        over = len(out) - DPH_REGION
+        one = DPH_ENTRY + len(getattr(passes[-1], "samples", [])) * DPH_PT
         raise ValueError(
-            f"表格 {len(out)} 字节，超出 {DPH_REGION} 字节的表区；"
-            "减少过境数 / 缩短天数 / 把采样间隔调大")
+            f"表格 {len(out):,} B，超过表区 {DPH_REGION:,} B"
+            f"（{DPH_REGION // 1024} KiB）{over:,} B。少选 1 趟大约能省 {one:,} B；"
+            f"或者把采样间隔调大（10 s 的表只有 5 s 的一半）、把天数/仰角收窄。")
     return bytes(out)
 
 

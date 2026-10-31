@@ -10,8 +10,11 @@
      这里用**固件那段整数代码的等价实现**（DPH_Q1000 的
      t_ms*1000/step_ms + a+(b-a)*frac/1000 + int16 量化）去比，
      而不是另写一份漂亮的浮点插值。
-  2. 容量：30 条 × 最长 1500 s × 5 s 栅格（301 点/条），字节数必须 ≤ 65536，
-     而且 build_table 真能拼出一张 validate_table 认可的表。
+  2. 容量：条目区必须正好填满表头扇区（102 条 × 40 B + 16 B == 4,096），
+     一趟满长过境必须装得下，而"这张表几趟"按**真实字节**算 ——
+     `table_used()` / `fit_keep()` 给出的趟数与字节数要自洽
+     （10 s 与 5 s 两档分别实测），并且 build_table 真能拼出一张
+     validate_table 认可的表。
   3. 归属：表区里躺的不是我们的东西时，PC 端必须在**擦之前**说不；
      反过来，**表区自己的每一个扇区都必须被 guard() 放行** —— 上一版只测了
      "拦得住"，没测"放得行"，于是 FLASH_VOICE_PACK 盖住表区、写表按钮全线
@@ -161,28 +164,56 @@ def check_accuracy():
 
 
 def check_capacity():
-    hdr(f"容量：{core.DPH_PASS_MAX} 条 × {core.DPH_DUR_S_MAX} s × "
-        f"{core.DPH_STEP_MS_MIN / 1000:g} s 栅格，塞得进 {core.DPH_REGION // 1024} KiB 吗")
-    step_ms = core.DPH_STEP_MS_MIN
-    # 样点数是 floor(dur/step)+1：0, 5, ..., 1500 是 301 个点而不是 300。
-    # 少算这一个点，两端就一起少算 180 B，回归自然全绿（上一版就是这样）。
-    pts = core.DPH_DUR_S_MAX * 1000 // step_ms + 1
-    per = core.DPH_ENTRY + pts * core.DPH_PT
-    need = core.DPH_HDR + core.DPH_PASS_MAX * per
-    (ok if need <= core.DPH_REGION else bad)(
-        f"最坏情况 {core.DPH_PASS_MAX} 条 × {core.DPH_DUR_S_MAX} s "
-        f"= {need:,} B ≤ 表区 {core.DPH_REGION:,} B（每条 {per} B / {pts} 点）；"
-        f"再加 4 KiB 样点偏移是 {need + core.DPH_SAMPLE_OFF:,} B")
+    hdr("容量：条目区必须正好填满表头扇区，字节数按真实表算（不再有固定趟数）")
+    # 1. 条目区 = 表头 + PASS_MAX 条 40 B 条目，必须**正好**等于样点区起点。
+    #    多一条就越界写进样点区，少一条那个扇区就白扔。
+    need = core.DPH_HDR + core.DPH_PASS_MAX * core.DPH_ENTRY
+    (ok if need == core.DPH_SAMPLE_OFF else bad)(
+        f"{core.DPH_PASS_MAX} 条 × {core.DPH_ENTRY} B + {core.DPH_HDR} B 表头 = {need:,} B "
+        f"== 样点区起点 0x{core.DPH_SAMPLE_OFF:X}"
+        if need == core.DPH_SAMPLE_OFF else
+        f"条目区对不上：{need:,} B ≠ 样点区起点 {core.DPH_SAMPLE_OFF:,} B")
 
-    # 真实数据：把窗口内能找到的过境排成一张表（不要求正好塞满上限 —— 上限是
-    # 地盘约束，不是"必须凑满"，凑多少算多少，关键是真表也要装得下）
+    # 2. 哪怕只有一趟、哪怕是最密的栅格、最长时长，也必须装得下。
+    pts = core.DPH_DUR_S_MAX * 1000 // core.DPH_STEP_MS_MIN + 1
+    per = core.DPH_ENTRY + pts * core.DPH_PT
+    (ok if core.DPH_SAMPLE_OFF + per <= core.DPH_REGION else bad)(
+        f"最坏的一趟（{core.DPH_DUR_S_MAX} s @ {core.DPH_STEP_MS_MIN / 1000:g} s，"
+        f"{pts} 点）{per:,} B，加 4 KiB 样点偏移 = {core.DPH_SAMPLE_OFF + per:,} B "
+        f"≤ {core.DPH_REGION:,} B")
+
+    # 3. 真实数据：先数清楚同一片 64 KiB 在 10 s / 5 s 两档各能装几趟。
+    #    上一版这里断言"30 条最坏情况塞得下"，等于把条数上限钉死在最坏步长上，
+    #    10 s 档永远只用到一半 —— 现在按 table_used()/fit_keep() 的**真实字节**说话。
     sat, gnd = load_sat(), core.Ground(LAT, LON, ALT)
+    for step_s in (core.DPH_STEP_S_DEFAULT, core.DPH_STEP_MS_MIN / 1000.0):
+        ps = core.find_passes(sat, gnd, FREQ10 / 10.0, days=10, min_el=0.0,
+                              step=step_s, max_passes=core.DPH_PASS_MAX)
+        if not ps:
+            bad(f"{step_s:g} s 档十天内一趟过境都没排出来")
+            continue
+        keep = core.fit_keep(ps)
+        used = core.table_used(ps[:keep])
+        if keep <= 0:
+            bad(f"{step_s:g} s 档连一趟都装不下")
+            continue
+        ok(f"{step_s:g} s 档：{len(ps)} 趟候选，64 KiB 装得下 {keep} 趟"
+           f"（{used:,} B / {core.DPH_REGION:,} B，{used / core.DPH_REGION * 100:.0f}%）")
+        # 多 1 趟就必须判超
+        if keep < len(ps):
+            over = core.table_used(ps[:keep + 1])
+            (ok if over > core.DPH_REGION else bad)(
+                f"{step_s:g} s 档：再多 1 趟就是 {over:,} B > {core.DPH_REGION:,} B，"
+                f"fit_keep 不会多留")
+
+    # 4. 真表也得装得下：先按 fit_keep 裁到装得下的长度再构表
     passes = core.find_passes(sat, gnd, FREQ10 / 10.0, days=10, min_el=0.0,
                               step=core.DPH_STEP_S_DEFAULT,
                               max_passes=core.DPH_PASS_MAX)
     if not passes:
         bad("十天内一趟过境都没排出来，find_passes 或 TLE 缓存有问题")
         return
+    passes = passes[:max(1, core.fit_keep(passes))]
     try:
         table = core.build_table(passes, FREQ10, core.DPH_STEP_S_DEFAULT,
                                  tz_hours=8)
@@ -417,13 +448,24 @@ def check_firmware():
         ok(f"样点区 0x{h['DPH_SAMPLE_OFF']:X} 在表头（{h['DPH_HDR_SIZE']} B）之后，"
            f"中间 {h['DPH_SAMPLE_OFF'] - h['DPH_HDR_SIZE']} B 空着")
 
-    cap = (h["DPH_HDR_SIZE"] + h["DPH_PASS_MAX"] *
-           (h["DPH_ENTRY_SIZE"] +
-            (h["DPH_DUR_S_MAX"] * 1000 // h["DPH_STEP_MS_MIN"] + 1) * h["DPH_PT_SIZE"]))
-    if cap <= region:
-        ok(f"编译期断言重算：{cap:,} B ≤ {region:,} B（余 {region - cap:,} B）")
+    # 编译期那两条断言（FIX(CAP-BY-BYTES)）用同一套整数重算：
+    #   1. 条目区必须正好填满表头扇区；
+    #   2. 一趟满长过境必须装得下。
+    entry_area = h["DPH_HDR_SIZE"] + h["DPH_PASS_MAX"] * h["DPH_ENTRY_SIZE"]
+    if entry_area == h["DPH_SAMPLE_OFF"]:
+        ok(f"编译期断言 1 重算：{h['DPH_PASS_MAX']}×{h['DPH_ENTRY_SIZE']}"
+           f"+{h['DPH_HDR_SIZE']} = {entry_area:,} B == 样点区起点 "
+           f"0x{h['DPH_SAMPLE_OFF']:X}（条目区不多不少）")
     else:
-        bad(f"编译期断言重算：{cap:,} B > {region:,} B，固件根本编不过")
+        bad(f"编译期断言 1 重算：{entry_area:,} B ≠ 样点区起点 "
+            f"{h['DPH_SAMPLE_OFF']:,} B，固件根本编不过")
+
+    one = (h["DPH_SAMPLE_OFF"] + h["DPH_ENTRY_SIZE"] +
+           (h["DPH_DUR_S_MAX"] * 1000 // h["DPH_STEP_MS_MIN"] + 1) * h["DPH_PT_SIZE"])
+    if one <= region:
+        ok(f"编译期断言 2 重算：最坏一趟 {one:,} B ≤ 表区 {region:,} B")
+    else:
+        bad(f"编译期断言 2 重算：最坏一趟 {one:,} B > 表区 {region:,} B，固件根本编不过")
 
     mb = read_defines(MB_H)
     sonic = mb.get("MB_SONIC_RESERVE_BASE")
