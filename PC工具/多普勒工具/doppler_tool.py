@@ -33,7 +33,7 @@ RES_DIR = getattr(sys, "_MEIPASS", SCRIPT_DIR)
 if getattr(sys, "frozen", False):
     DATA_DIR = os.path.join(
         os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
-        "F4HWN-Doppler-Tool")
+        "DopplerPass")
     os.makedirs(DATA_DIR, exist_ok=True)
 else:
     DATA_DIR = SCRIPT_DIR
@@ -423,7 +423,10 @@ def age_label(stamp):
 class Tool(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("多普勒过境表 · F4HWN SSTV · R6")
+        # 标题只放程序名和开发者，基座致谢挪到左栏底部（见下）。
+        # 原来把"（固件基座 F4HWN SSTV）"塞进标题栏，任务栏一缩就变成
+        # "多普勒过境表 · BG0…"，两个名字都读不全 —— 致谢不该靠标题栏承载。
+        self.title("多普勒过境表 · BG0FPJ")
         self.geometry("1240x840")
         try:
             self.state("zoomed")
@@ -501,6 +504,15 @@ class Tool(tk.Tk):
         left = tk.Frame(wrap, bg=SIDE, width=324)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
+
+        # 基座致谢：电台固件是 F4HWN 的 SSTV v6.3.0，多普勒这一层是本工具加的。
+        # 侧栏底部常驻一行，不靠标题栏承载（标题栏会被任务栏截断）。
+        # App 侧同一句话在「设置 › 关于」和新手教程末尾，固件信息页则是
+        # BASE/DEV 两行 —— 三端各一处，措辞一致。
+        tk.Label(left, text="固件基座 F4HWN SSTV v6.3.0\n多普勒层 BG0FPJ",
+                 bg=SIDE, fg=DIM, font=("Microsoft YaHei UI", 8),
+                 justify="left", anchor="w").pack(side="bottom", fill="x",
+                                                  padx=10, pady=(0, 8))
 
         tk.Label(left, text="卫星", bg=SIDE, fg=DIM,
                  font=("Microsoft YaHei UI", 9), anchor="w").pack(fill="x", padx=10, pady=(10, 2))
@@ -1672,7 +1684,8 @@ if __name__ == "__main__":
     # 从没起来过，对方只需要把 logs\pc-*.log 发回来即可定位。
     import traceback
 
-    log_line("start", f"F4HWN 多普勒过境表工具 · 打包={getattr(sys, 'frozen', False)}"
+    log_line("start", f"多普勒过境表 BG0FPJ（固件基座 F4HWN SSTV）"
+                      f" · 打包={getattr(sys, 'frozen', False)}"
                       f" · py={sys.version.split()[0]} · 数据目录={DATA_DIR}")
     try:
         Tool().mainloop()
