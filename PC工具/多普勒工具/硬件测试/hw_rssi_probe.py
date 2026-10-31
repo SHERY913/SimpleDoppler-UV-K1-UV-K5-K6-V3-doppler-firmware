@@ -12,8 +12,8 @@ RSSI 应跟着跳同样的 dB 数——后者就必须把增益加回去才能�
     python hw_rssi_probe.py --port COM7 --seconds 20
     python hw_rssi_probe.py 30                  # 位置参数也认（老写法）
 """
-import sys, time, statistics
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, statistics
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 
 import serial
 import radio_proto as rp

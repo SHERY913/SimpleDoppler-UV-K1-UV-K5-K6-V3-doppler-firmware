@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """防呆实验：接管+推帧后直接拔线（关串口），8 s 后重连看频率有没有自己回来。"""
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 import serial, radio_proto as rp
 
 

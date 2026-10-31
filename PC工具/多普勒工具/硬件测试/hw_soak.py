@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """连推 10 s（5 Hz，像 App 那样扫频），每 2 s 抽一次 0x0770 / 0x0772，最后交还。"""
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 import serial, radio_proto as rp
 
 ser = serial.Serial("COM7", 38400, timeout=0.05)

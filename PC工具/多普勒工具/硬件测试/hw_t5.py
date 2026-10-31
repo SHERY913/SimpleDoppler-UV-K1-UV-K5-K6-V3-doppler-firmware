@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """对照实验：page 关/开 两种顺序下，接管位能不能活下来。"""
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 import serial, radio_proto as rp
 
 ser = serial.Serial("COM7", 38400, timeout=0.05)

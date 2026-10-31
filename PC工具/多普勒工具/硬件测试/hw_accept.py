@@ -6,8 +6,8 @@ T3 接管生效           T4 24 字节短帧（不补零）  T5 36 字节补零�
 T6 0x0770 单位 == 10 Hz  T7 10 s 连推          T8 拔线防呆
 T9 交还还频
 """
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 import serial, radio_proto as rp
 
 PORT = "COM7"

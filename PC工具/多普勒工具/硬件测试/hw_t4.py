@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """T4 细查：接管到底有没有生效、什么时候失效。只读+可控，最后一定交还。"""
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 import serial, radio_proto as rp
 
 PORT, BAUD = "COM7", 38400

@@ -7,8 +7,8 @@
   T3 REG_3B 守卫        -> 读-写-再读，值必须不变，且链路还活着
   T4 接管 + 推帧 + 读回  -> 0x0770 必须等于刚推下去的 rx10，然后交还
 """
-import sys, time, struct
-sys.path.insert(0, r"C:\Users\13766\Documents\deepseek-harness\default-workspace\多普勒\PC工具\多普勒工具")
+import os, sys, time, struct
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # 上一级就是工具根，项目搬家/改名不再断
 
 import serial
 import radio_proto as rp
