@@ -40,3 +40,4 @@ verify/bridge.log
 # Look4Sat 路线已搁置，反编译出的 824 KB 混淆 java 是派生产物；
 # 分析脚本（reverse/*.py）和结论（文档/历史/外部参考-Look4Sat.md）都留着
 reverse/look4sat-decompiled/
+tests/sim/out/

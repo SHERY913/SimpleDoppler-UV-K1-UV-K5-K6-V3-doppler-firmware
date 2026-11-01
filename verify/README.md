@@ -216,11 +216,11 @@ RAM 12,704 B / 16 KB = 77.54%，FLASH 95,532 B / 118 KB = 79.06%。
 | 接管响一声 | `DOPPLER_SetExtControl(true)`：`gBeepToPlay = BEEP_1KHZ_60MS_OPTIONAL` | 手机接管瞬间电台单声 beep，不用看屏幕就知道拿到了 |
 | 交还响双声 | 原有的 watchdog / 主动交还路径 | 双 beep |
 | `APP` 角标多留 3 秒 | 新增 `ext_shown_until = now + 3000` | 握手成功后即使链路立刻断，`APP` 也不会瞬间消失 |
-| `LOCKED` 闪 2 秒 | `KEY_MENU` 新增分支：`sub == 0 && ext_ctrl` → `ext_lock_until = now + 200`（10 ms tick），并单声 beep | 接管中按 M：屏幕 `$J` 位置显示 `LOCKED`，不启动过境，键位不再像坏了 |
-| `$J` 分支重写 | `case 'J'`：LOCKED（2 s）> APP（接管中或角标期）> 空 | READY (126,21) / RUN (122,22) 两处右对齐位置 |
+| `LOCK` 闪 2 秒 | `KEY_MENU` 新增分支：`sub == 0 && ext_ctrl` → `ext_lock_until = now + 200`（10 ms tick），并单声 beep | 接管中按 M：屏幕 `$J` 位置显示 `LOCK`，不启动过境，键位不再像坏了 |
+| `$J` 分支重写 | `case 'J'`：LOCK（2 s）> APP（接管中或角标期）> 空 | READY (126,21) / RUN (122,22) 两处右对齐位置 |
 
 `$J` 的优先级用有符号差值比较（`(int32_t)(ext_lock_until - now) > 0`），
-10 ms 计数器回绕后不会误判成"永远 LOCKED"。
+10 ms 计数器回绕后不会误判成"永远 LOCK"。
 
 **验证前提**：必须刷这版。旧固件不认 `0x0768`，屏幕上不会出现 `APP`，按 M 也照旧启动——
 用户看到的"电台完全不知道手机在控它"就是这个原因，不是设计问题。

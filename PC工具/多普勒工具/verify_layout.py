@@ -44,7 +44,7 @@ F_EDITOR = HERE / "layout_editor.html"
 F_CLEAR = HERE / "clear_table.py"              # 也照着表头标识决定放不放行擦除
 F_DETAIL_KT = KT / "ui" / "DetailScreen.kt"    # App 的擦除闸门
 F_DOC = HERE / "多普勒使用说明.md"
-F_FLASH_MAP = ROOT / "文档" / "外部flash空间地图-实测.md"
+F_FLASH_MAP = ROOT / "文档" / "历史" / "外部flash空间地图-实测.md"
 F_DELIV = ROOT / "交付" / "README.md"
 
 BAD: list[str] = []
@@ -647,6 +647,54 @@ def main() -> int:
                        "该改：PC 工具 layout_editor.html 的 SAMPLE（顺便补上面那行占位符说明）")
         else:
             OK.append(f"排版器 SAMPLE 覆盖布局里全部 {len(lay_ph)} 种占位符")
+
+    # ── 写频合必须同步 last_freq ──────────────────────────────────────────
+    # last_freq 是"芯片现在停在哪一个频点"的唯一缓存，DPH_Tune() 一开头就拿它
+    # 做 `freq == last_freq -> return` 的早退。任何一处真写 BK4819 频合的地方
+    # 漏了同步，下一次"松手回接收频率"就会被这行早退整段吞掉：屏幕 $F 读的是
+    # pRX、照样写着正确的下行数字，芯片却停在上行频点上 —— 屏对、硬件错，
+    # 台子上表现为"按完 PTT 就听不见卫星了"，而且只有再按一次 M 才恢复。
+    # 2026-11-01 就是这么漏的（DPH_TxApply 少了一行 last_freq = up），本轮补上。
+    #
+    # 判定方式：把 doppler.c 按"顶格 }"切成函数块（内层 if/for 的右括号都有缩进，
+    # 不会误切）；块里出现真调用 BK4819_SetFrequency( 的，块内必须有一条真赋值
+    # `last_freq =`（同步、清零、先存原值都算）。注释不算 —— 否则一段解释这份
+    # 缓存的注释就能让检查永远绿，那是会骗人的检查。
+    spans = []
+    prev = 0
+    for m in re.finditer(r"(?m)^\}\s*$", dop_c):
+        spans.append((prev, m.start()))
+        prev = m.start()
+    spans.append((prev, len(dop_c)))
+
+    def _strip_comments(text: str) -> str:
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        text = re.sub(r"/\*[^\n]*$", "", text, flags=re.M)
+        return re.sub(r"//[^\n]*", "", text)
+
+    miss = []
+    ncall = 0
+    for m in re.finditer(r"(?m)^(?!\s*\*)(?!\s*/\*).*?\bBK4819_SetFrequency\s*\(", dop_c):
+        ncall += 1
+        line = dop_c.count("\n", 0, m.start()) + 1
+        span = next((sp for sp in spans if sp[0] <= m.start() < sp[1]), None)
+        if span is None:
+            miss.append("第 %d 行（找不到所属函数块，本检查失效）" % line)
+            continue
+        if not re.search(r"\blast_freq\s*=", _strip_comments(dop_c[span[0]:span[1]])):
+            miss.append("第 %d 行" % line)
+
+    if ncall == 0:
+        BAD.append("doppler.c 里一处 BK4819_SetFrequency( 真调用都解析不到 —— "
+                   "写频入口改名了，本检查需要更新（解析不到就是失败，别静默通过）")
+    elif miss:
+        BAD.append("这些地方写了 BK4819 频合、但所在函数没见过 last_freq = 赋值："
+                   + "、".join(miss)
+                   + " —— 漏同步会让下一次 DPH_Tune() 的 freq == last_freq 早退"
+                     "吞掉松手后的恢复，芯片停在上行频点上而屏幕照旧显示下行频率")
+    else:
+        OK.append("每处 BK4819_SetFrequency( 真调用所在函数都有一条 last_freq = 赋值"
+                  "（共 %d 处）" % ncall)
 
     # ── 输出 ──
     for line in OK:

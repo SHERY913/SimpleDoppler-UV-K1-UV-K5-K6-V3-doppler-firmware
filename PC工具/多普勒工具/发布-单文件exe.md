@@ -55,3 +55,40 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed \
 `%LOCALAPPDATA%` 下自动建目录、生成的配置 `lat="" lon=""`（没带作者坐标）、
 启动日志落盘。**没验**：连真机写表（要手台）、火绒是否弹窗拦这个 exe
 （本机装了火绒但测试是用显式 TMP 起的，没触发拦截观察）。
+
+## 2026-11-01 17:52 重打记录（交接-25 那一轮）
+
+用的是**入库的 spec**（比长命令行稳，路径写死在里面）：
+
+```bash
+OUT="C:/Users/13766/Documents/deepseek-harness/default-workspace/临时/exe-build"
+python -m PyInstaller --noconfirm --clean --distpath "$OUT/dist" --workpath "$OUT/build" F4HWN-Doppler-Tool.spec
+```
+
+产物 `F4HWN-Doppler-Tool.exe` 34,883,445 B / md5 `fa1c14fd418e111e4b08373c253efedb`，
+复制成桌面 `无线电\DopplerPass.exe`（这个文件名不随构建变，桌面上只留它一份）。包的是 11-01 14:24 那份 `doppler_tool.py`。
+构件原名件归档在 `无线电\_旧版exe-20261101\DopplerPass-1752.exe`。
+
+**「坑 2」这次换了形态**：`cmd //c "set TMP=… && set TEMP=… && start …"` 那条路直接回
+`拒绝访问。`，进程根本没起来（`tasklist` 里查不到，日志也没新增）。可行做法是
+**直接在 exe 目录里执行它** `./DopplerPass.exe`（onefile 会起两个进程：
+父进程 + 真正的 UI 子进程），验完 `taskkill //F //IM DopplerPass.exe` 收工。
+
+验收判据（照旧，两条都要有）：
+
+- `%LOCALAPPDATA%\DopplerPass\logs\pc-YYYYMMDD.log` 里有
+  `11-01 17:54:46  start 多普勒过境表 BG0FPJ（固件基座 F4HWN SSTV） · 打包=True · py=3.13.14 · 数据目录=…`，
+  且**没有 traceback**；
+- `Get-Process DopplerPass | Select MainWindowTitle` 得到 `多普勒过境表 · BG0FPJ`
+  —— 标题栏去掉「（固件基座 F4HWN SSTV）」那处改动确实进了包，能反证 pack 的是新源码。
+
+zip 重打（zipfile, `ZIP_DEFLATED` compresslevel 6，与旧包同构：flat，两份文件）：
+
+| 项 | 大小 | md5 |
+|---|---|---|
+| `DopplerPass.exe`（= 新 exe 改名） | 34,883,445 | `fa1c14fd418e111e4b08373c253efedb` |
+| `f4hwn.sstv.doppler.bin`（= `交付/` 那份） | 106,480 | `8c31eb1e7495aafba156be5aab79349e` |
+| `多普勒过境表-win单文件.zip` | 34,617,748 | `31519dae1e68a3560ca296f7611735b6` |
+
+旧 zip 已删（02:00 版那个里面的 `DopplerPass-0200.exe` 与 `441908c5…` 都另有独立留存）；
+18:32 因为固件换成 `8c31eb1e…` 又重打过一次 zip，**exe 一行没动**。

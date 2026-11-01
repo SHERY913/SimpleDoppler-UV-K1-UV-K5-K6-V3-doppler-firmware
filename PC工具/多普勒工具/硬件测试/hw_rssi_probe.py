@@ -20,7 +20,7 @@ import radio_proto as rp
 
 
 def parse_args(argv):
-    """以前这里只有 `float(argv[1])`，而 文档/项目交接-9.md 的"真机作业"写的是
+    """以前这里只有 `float(argv[1])`，而 文档/历史/项目交接-9.md 的"真机作业"写的是
     `--port COM7 --seconds 20` —— 照文档抄命令的人第一条就崩。以文档为准。"""
     port, dur = "COM7", 20.0
     i = 0

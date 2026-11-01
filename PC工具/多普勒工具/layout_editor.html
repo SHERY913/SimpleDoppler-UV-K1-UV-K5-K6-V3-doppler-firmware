@@ -2,26 +2,38 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>Doppler 排版器 · 128×64</title>
+<title>Doppler 排版器 · 128×56</title>
 <style>
   :root { --ink:#1a2418; --paper:#a8c292; }
   * { box-sizing: border-box; }
   body { margin:0; font:13px/1.5 "Segoe UI",system-ui,sans-serif; background:#1b1d1f; color:#d8dcd8; }
-  header { padding:10px 14px; background:#242729; display:flex; gap:8px; align-items:center; border-bottom:1px solid #333; }
+  header { padding:10px 14px; background:#242729; display:flex; gap:8px; align-items:center; border-bottom:1px solid #333; flex-wrap:wrap; }
   header h1 { font-size:14px; margin:0 14px 0 0; font-weight:600; color:#9fd08a; }
   button { background:#2f3437; color:#d8dcd8; border:1px solid #3d4448; padding:5px 11px; border-radius:4px; cursor:pointer; font-size:12px; }
   button:hover { background:#3a4044; }
   button.on { background:#3f7a35; border-color:#4d9440; color:#fff; }
+  button.warn.on { background:#7a6a20; border-color:#9c8726; color:#fff; }
   main { display:flex; gap:16px; padding:16px; align-items:flex-start; }
+  #left { display:flex; flex-direction:column; gap:10px; }
   #wrap { position:relative; }
   canvas { display:block; image-rendering:pixelated; border:1px solid #3d4448; border-radius:3px; cursor:crosshair; }
-  #side { width:330px; display:flex; flex-direction:column; gap:10px; }
-  #tabs { display:flex; gap:6px; }
-  #tabs button { flex:1; padding:6px 0; }
+  #diag { width:768px; background:#242729; border:1px solid #333; border-radius:4px; padding:8px 10px;
+          max-height:190px; overflow:auto; font-size:12px; line-height:1.65; }
+  #diag .ok { color:#8fbf72; }
+  #diag .bad { color:#ff7a5c; }
+  #diag .wn { color:#e0b83a; }
+  #diag code { font-family:Consolas,monospace; color:#cfd6cf; }
+  #side { width:340px; display:flex; flex-direction:column; gap:10px; }
+  #tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  #tabs button { flex:1; padding:6px 0; min-width:84px; font-size:11px; position:relative; }
+  #tabs button .dot { position:absolute; top:3px; right:5px; width:6px; height:6px; border-radius:50%; background:#ff5d3a; }
+  #tabs button .dot.w { background:#e0b83a; }
   #list { background:#242729; border:1px solid #333; border-radius:4px; max-height:300px; overflow:auto; }
   .row { display:flex; gap:6px; align-items:center; padding:5px 8px; border-bottom:1px solid #2c2f31; cursor:pointer; }
   .row:last-child { border-bottom:none; }
   .row.sel { background:#31443a; }
+  .row.bad { border-left:3px solid #ff5d3a; }
+  .row.wn { border-left:3px solid #e0b83a; }
   .row .tag { font-size:10px; padding:1px 5px; border-radius:3px; background:#3d4448; color:#a9b2ad; min-width:38px; text-align:center; }
   .row .txt { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:Consolas,monospace; }
   .row .xy { font-size:11px; color:#7d8a80; font-variant-numeric:tabular-nums; }
@@ -36,18 +48,25 @@
 <body>
 <header>
   <h1>Doppler 排版器</h1>
-  <span class="hint">拖拽移动 · 方向键微调 · Del 删除 ｜ RUN 页也是第二套逻辑（手机推数据）用的那页</span>
+  <span class="hint">拖拽移动 · 方向键微调 · Del 删除</span>
   <span style="flex:1"></span>
+  <button id="b_worst" class="on" onclick="toggleWorst()">按最坏串</button>
+  <button id="b_check" class="on" onclick="toggleCheck()">实时告警</button>
   <button onclick="addItem()">+ 加文字</button>
   <button onclick="delItem()">− 删除选中</button>
-  <button onclick="exportC()">导出 C 代码</button>
+  <button onclick="copyC()">复制 C 数组</button>
+  <button onclick="copyJSON()">复制 JSON</button>
+  <button onclick="exportC()">存 doppler_layout.h</button>
   <button onclick="exportJSON()">存 JSON</button>
   <button onclick="document.getElementById('file').click()">读 JSON</button>
   <input type="file" id="file" style="display:none" accept=".json" onchange="importJSON(this)">
 </header>
 
 <main>
-  <div id="wrap"><canvas id="cv" width="768" height="384"></canvas></div>
+  <div id="left">
+    <div id="wrap"><canvas id="cv" width="768" height="336"></canvas></div>
+    <div id="diag"></div>
+  </div>
 
   <div id="side">
     <div id="tabs"></div>
@@ -62,7 +81,7 @@
         <option value="bar">进度条</option>
       </select></label>
       <label>X <input id="p_x" type="number" min="0" max="127" oninput="upd('x',+this.value)"></label>
-      <label>Y <input id="p_y" type="number" min="0" max="47" oninput="upd('y',+this.value)"></label>
+      <label>Y <input id="p_y" type="number" min="0" max="55" oninput="upd('y',+this.value)"></label>
       <label>对齐 <select id="p_align" onchange="upd('align',this.value)">
         <option value="left">左对齐（X 是起点）</option>
         <option value="center">居中</option>
@@ -70,7 +89,9 @@
       </select></label>
     </div>
     <div class="hint">
-      占位符，画的时候自动换成真实值：<br>
+      画布就是 <b>128×56 像素</b>（7 个 frame row），1 格 = 6 px。坐标 y 与固件
+      <code>doppler_layout.h</code> 里的数字<b>逐像素对应</b>，不是"大概位置"。<br>
+      占位符画的时候换成值：<br>
       <code>$F</code> 频率 &nbsp; <code>$E</code> 仰角 &nbsp; <code>$D</code> dBm &nbsp; <code>$O</code> 偏移<br>
       <code>$P</code> 百分比 &nbsp; <code>$L</code> 剩余时间 &nbsp; <code>$U</code> 已用时间<br>
       <code>$S</code> 卫星名 &nbsp; <code>$N</code> 序号 &nbsp; <code>$T</code> 总数 &nbsp; <code>$M</code> 最大仰角<br>
@@ -78,7 +99,7 @@
       <code>$Y</code> 上行频率 &nbsp; <code>$Z</code> 亚音 &nbsp; <code>$G</code> 斜距 km &nbsp; <code>$H</code> 径向速度 &nbsp; <code>$B</code> 日期 MM-DD<br>
       <code>$C</code> 时钟 &nbsp; <code>$K</code> 校准计时 &nbsp; <code>$X</code> 校准系数 &nbsp;
       <code>$R</code> 距 AOS 秒 &nbsp; <code>$I</code> 输入区 &nbsp; <code>$Q</code> 功率 &nbsp; <code>$J</code> APP 角标<br>
-      <span>26 个字母用完之后新增的（符号占位符）：</span><br>
+      <span>符号占位符：</span>
       <code>$!</code> ARMED/M RUN &nbsp; <code>$@</code> 空表原因 &nbsp; <code>$V</code> 校准系数（校准页）<br>
       <code>$*</code> 跟踪步长（1 键选的 1/2/5/10 秒） &nbsp; <code>$-</code> 接收带宽（3 键切 25k/12k）<br>
       <b>信息页（INFO，page 6）：</b><code>$#</code> 固件版本 &nbsp; <code>$%</code> 编译日期 &nbsp;
@@ -89,18 +110,23 @@
     <div class="btns">
       <button onclick="loadDefault()">恢复默认布局</button>
     </div>
+    <div class="hint">
+      <b>交给固件那边之前</b>：点「复制 C 数组」或「复制 JSON」，把剪贴板内容发过去即可。<br>
+      下面这几格是仓库检查会守的，删掉或者挪出屏，<code>check_layout_overlap.py</code> 会红：<br>
+      page 1 要有 <code>$*s</code> 和 <code>$-</code>；page 7 / page 8 要有 <code>$Y</code>。
+    </div>
   </div>
 </main>
 
 <script src="fonts_data.js"></script>
 <script>
-const W=128, H=64, Z=6;
+const W=128, H=56, Z=6;
 const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE','INFO','PRE-LISTEN','POST-LISTEN'];
 const SAMPLE={ $F:'145.7976', $E:'42', $D:'<-125', $O:'-2360', $P:'60', $L:'-04:12',
                $U:'06:18', $N:'1', $T:'17', $M:'68', $A:'10:20', $W:'6.5K',
                $S:'RS-44 & BR', $C:'22:41:07', $K:'12:34', $X:'1.0062',
                $R:'04:12', $I:'------', $Q:'5W', $Y:'145.98900', $Z:'T67.0', $J:'APP',
-               $G:'475', $H:'-0.8', $B:'10-26',
+               $G:'65535', $H:'-0.8', $B:'10-26',
                /* 符号占位符：$ 后面跟符号不是合法的 JS 标识符，键必须加引号。 */
                '$!':'M RUN', '$@':'NO TABLE', '$V':'1.0062',
                /* 信息页（page 6）专用，全部只读 */
@@ -109,7 +135,34 @@ const SAMPLE={ $F:'145.7976', $E:'42', $D:'<-125', $O:'-2360', $P:'60', $L:'-04:
                /* RUN 页 ▲▼ 步进（数字键 1 循环 1/2/5/10 s） */
                '$*':'3', '$-':'25k' };
 
+/* 最坏串：与 tests/sim/check_layout_overlap.py 的 WORST 表**逐条同源**。
+   排版要守的是"最坏情况不重叠"，用常见值排出来好看没有意义 —— $Z 常见是
+   T67.0（5 字），最坏是 T254.0（6 字），差 4 px 就是压不压字的差别。 */
+const WORST = { $F:'1267.99000', $Y:'1267.99000', $Z:'T254.0', $D:'<-125',
+                $O:'-12345', $P:'100', $J:'LOCK', $Q:'5W', $C:'22:41:07',
+                $S:'RS-44 & BR', $R:'04:12', $B:'10-26', $A:'10:20',
+                $U:'06:18', $M:'68', $E:'42', $G:'65535', $H:'-0.8',
+                $L:'-04:12', $V:'1.0062', '$*':'10', '$!':'ARMED', '$@':'NO TABLE',
+                '$#':'v6.3.0', '$%':'Oct 27 2026', '$&':'23:05:56', '$?':'1', '$=':'7.9V',
+                '$^':'17 26-10-27', '$<':'128', '$>':'+12', '$+':'3h12m', $I:'------',
+                $T:'17', $K:'12:34', $N:'1', $W:'6.5K', $X:'1.0062' };
+WORST['$-'] = '25k';
+/* '$!' 的最坏串跟页走：只有就绪页会印 "M RUN  HOLD:PRE"。 */
+const WORST_PAGE = { '0|$!': 'M RUN  HOLD:PRE' };
+
+/* 已知、不是本轮引入的贴边：只报警告，不判红（与 Python 那边同一份口径）。 */
+const KNOWN = {
+  'RX $F|$L': 'page 1：$F 只有 1.2G 那档（1267.99000，10 位）才会铺到 97 压住 94 起的 $L。',
+  '$J|$P%': 'page 1：两格共用右下角，但互斥 —— ext_lock_until 未到时跳过 $P%，那两秒里只有 $J。'
+};
+/* 仓库检查会守的内容项（check_layout_overlap.py 的 REQUIRED）。 */
+const REQUIRED = [ [1,'$*s','跟踪页要显示 ▲▼ 一格的步进'],
+                   [1,'$-','跟踪页要显示接收带宽'],
+                   [7,'$Y','预听页要显示上行频点'],
+                   [8,'$Y','尾音页要显示上行频点'] ];
+
 let model = null, page = 0, sel = 0, drag = null;
+let worstMode = true, checkMode = true, diagCache = null;
 
 /* ---------- glyph lookup ------------------------------------------- */
 function tinyGlyph(ch){ const c=ch.charCodeAt(0)-32; return (c>=0&&c<96)?TINY[c]:[0,0,0]; }
@@ -135,16 +188,42 @@ function bigGlyph(ch){
   return [top,bot];
 }
 
-/* ---------- measuring ---------------------------------------------- */
-function step(font){ return font==='tiny'?4 : font==='big'?13 : font==='bar'?88 : 7; }
-function textOf(it){ return it.text.replace(/\$./g, m=> SAMPLE[m] || m); }
-function widthOf(it){ return textOf(it).length * step(it.font); }
-function startX(it){
-  const w=widthOf(it);
-  if(it.align==='right')  return it.x - w;
-  if(it.align==='center') return Math.round((W-w)/2);
-  return it.x;
+/* ---------- 展开与度量 ---------------------------------------------- */
+function expand(text, pg){
+  return text.replace(/\$./g, m => {
+    if (worstMode){
+      const k = pg + '|' + m;
+      if (k in WORST_PAGE) return WORST_PAGE[k];
+      if (m in WORST) return WORST[m];
+      return m;
+    }
+    return (m in SAMPLE) ? SAMPLE[m] : m;
+  });
 }
+function textOf(it){ return expand(it.text, page); }
+function textOfP(it, pg){ return expand(it.text, pg); }
+
+/* 步进与字高与固件 DPH_DrawPage 一致：
+   tiny 4px/字 高 6；small/bold 7px/字 高 7；big 13px/字 高 16、y 是**行号**。
+   进度条是真占位（x..x+88，7 行高），不是空串 —— Python 那边按空串算，
+   这里按真实占位算，只会更严，不会放过重叠。 */
+function metrics(it, pg){
+  const s = (pg===undefined?textOf(it):textOfP(it,pg));
+  if (it.font === 'bar') return {l:it.x, r:it.x+88, t:it.y, b:it.y+6, s:'', it};
+  let cw, h, top;
+  if (it.font === 'tiny')            { cw = 4;  h = 6;  top = it.y; }
+  else if (it.font === 'big')        { cw = 13; h = 16; top = Math.min(it.y, 5) * 8; }
+  else                               { cw = 7;  h = 7;  top = it.y; }
+  const w = s.length * cw;
+  let l;
+  if (it.align === 'right')       l = (w >= it.x) ? 0 : it.x - w;
+  else if (it.align === 'center') l = (w >= W) ? 0 : Math.floor((W - w) / 2);
+  else                            l = it.x;
+  return {l, r:l + w - 1, t:top, b:top + h - 1, s, it};
+}
+
+/* 画的时候要起点，起点就是 metrics 算出来的左边界（对齐方式已经在里面算过）。 */
+function startX(it){ return metrics(it).l; }
 
 /* ---------- drawing ------------------------------------------------- */
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
@@ -160,7 +239,7 @@ function drawSmall(s,x,y,bold){ for(const ch of s){ const g=smallGlyph(ch);
   x+=7; } }
 
 function drawBig(s,line){
-  const y=8+line*8, w=s.length*13, x0=Math.round((W-w)/2);
+  const y=Math.min(line,5)*8, w=s.length*13, x0=Math.floor((W-w)/2);
   let x=x0;
   for(const ch of s){ const g=bigGlyph(ch);
     if(g) for(let c=0;c<7;c++){
@@ -179,33 +258,115 @@ function drawBar(x0,y,pct){
 
 function render(){
   px.forEach(r=>r.fill(0));
-  for(let x=2;x<W-2;x++) px[3][x]=1;
 
   for(const it of model[page]){
     const t=textOf(it);
-    if(it.font==='bar'){ drawBar(it.x, it.y+8, 60); continue; }
-    const sy = it.y + 8;
+    if(it.font==='bar'){ drawBar(it.x, it.y, 60); continue; }
     if(it.font==='big') drawBig(t, it.y);
-    else if(it.font==='tiny') drawTiny(t, startX(it), sy);
-    else if(it.font==='small') drawSmall(t, startX(it), sy, false);
-    else drawSmall(t, startX(it), sy, true);
+    else if(it.font==='tiny') drawTiny(t, startX(it), it.y);
+    else drawSmall(t, startX(it), it.y, it.font==='bold');
   }
 
   ctx.fillStyle='#a8c292'; ctx.fillRect(0,0,cv.width,cv.height);
   ctx.fillStyle='#1a2418';
   for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(px[y][x]) ctx.fillRect(x*Z,y*Z,Z,Z);
 
-  // selection box
+  /* 网格参考线：每 8 px 一条淡线，方便对齐 frame row。 */
+  ctx.strokeStyle='rgba(0,0,0,.10)'; ctx.lineWidth=1;
+  for(let y=8;y<H;y+=8){ ctx.beginPath(); ctx.moveTo(0,y*Z+0.5); ctx.lineTo(cv.width,y*Z+0.5); ctx.stroke(); }
+
+  const d = checkMode ? (diagCache || validate()) : null;
+
+  /* 有问题的格子：红框；已知贴边：黄框 */
+  if(d){
+    const set = (arr, color, dash)=>{ ctx.save(); ctx.setLineDash(dash||[]);
+      ctx.strokeStyle=color; ctx.lineWidth=1;
+      arr.forEach(i=>{ const it=model[page][i]; if(!it) return; const m=metrics(it);
+        ctx.strokeRect(m.l*Z-0.5, m.t*Z-0.5, (m.r-m.l+1)*Z+1, (m.b-m.t+1)*Z+1); });
+      ctx.restore(); };
+    set(d.warnIdx[page] || [], '#e0b83a', [4,3]);
+    set(d.badIdx[page]  || [], '#ff3b1f');
+  }
+
+  /* 选中框 */
   const it=model[page][sel];
   if(it){
-    let bx,by,bw,bh;
-    if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
-    else if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
-    else if(it.font==='big'){ bw=textOf(it).length*13; bx=Math.round((W-bw)/2); by=8+it.y*8; bh=16; }
-    else { bw=widthOf(it); bx=startX(it); by=it.y+8; bh=it.font==='tiny'?6:7; }
-    ctx.strokeStyle= sel===undefined?'#000':'#ff5d3a'; ctx.lineWidth=1;
-    ctx.strokeRect(bx*Z-0.5, by*Z-0.5, bw*Z+1, bh*Z+1);
+    const m=metrics(it);
+    ctx.strokeStyle='#ff5d3a'; ctx.lineWidth=2;
+    ctx.strokeRect(m.l*Z-1, m.t*Z-1, (m.r-m.l+1)*Z+2, (m.b-m.t+1)*Z+2);
   }
+}
+
+/* ---------- 检查 ---------------------------------------------------- */
+function validate(){
+  const badIdx={}, warnIdx={}, lines=[], req=[];
+  let nBad=0, nWarn=0;
+
+  for(let pg=0; pg<model.length; pg++){
+    const cells = model[pg].map(it=>metrics(it, pg));
+    badIdx[pg]=[]; warnIdx[pg]=[];
+    const mark=(arr,i)=>{ if(!arr.includes(i)) arr.push(i); };
+
+    for(const c of cells){
+      const t = c.s || '（进度条）';
+      if (c.b > H-1 || c.t < 0 || c.l < 0){
+        lines.push(['bad', `page ${pg} ${PAGES[pg]}：<b>出屏</b> <code>${esc(t)}</code> → x${c.l}..${c.r} y${c.t}..${c.b}（可用 0..${W-1} / 0..${H-1}）`]);
+        mark(badIdx[pg], model[pg].indexOf(c.it)); nBad++;
+      } else if (c.r > W-1){
+        if (c.it.font === 'big'){
+          /* font 3 超宽由固件 DPH_DrawPage 自己砍字，Python 那边也只提示不判红。
+             这里同样只写一行，不计入告警、不打点，免得常驻一个黄点在页签上。 */
+          lines.push(['wn', `page ${pg}：大字超宽 <code>${esc(t)}</code> x${c.l}..${c.r} —— 固件会自己砍字，不致命`]);
+        } else {
+          lines.push(['bad', `page ${pg}：<b>超右界</b> <code>${esc(t)}</code> → x${c.l}..${c.r}`]);
+          mark(badIdx[pg], model[pg].indexOf(c.it)); nBad++;
+        }
+      }
+    }
+
+    for(let i=0;i<cells.length;i++) for(let j=i+1;j<cells.length;j++){
+      const a=cells[i], b=cells[j];
+      if (a.r < b.l || b.r < a.l) continue;      /* 贴边不算重叠 */
+      if (a.b < b.t || b.b < a.t) continue;
+      /* 已知贴边的键按 Python 那边 (a, b) 的书写顺序登记，两种朝向都查一次，
+         免得"谁先谁后"取决于数组顺序。注意键用的是**原始模板文**（'RX $F'），
+         不是展开后的字符串 —— 与 check_layout_overlap.py 的 KNOWN 同源。 */
+      const ta = a.it.text, tb = b.it.text;
+      const key = (ta + '|' + tb) in KNOWN ? (ta + '|' + tb) : (tb + '|' + ta);
+      const txt = `page ${pg} ${PAGES[pg]}：<code>${esc(a.s||'（进度条）')}</code> x${a.l}..${a.r} ` +
+                  `↔ <code>${esc(b.s||'（进度条）')}</code> x${b.l}..${b.r}`;
+      if (key in KNOWN){
+        lines.push(['wn', txt + ` <span style="color:#8a8050">（已知贴边：${KNOWN[key]}）</span>`]);
+        mark(warnIdx[pg], i); mark(warnIdx[pg], j); nWarn++;
+      } else {
+        lines.push(['bad', txt + ' —— <b>重叠</b>']);
+        mark(badIdx[pg], i); mark(badIdx[pg], j); nBad++;
+      }
+    }
+  }
+
+  REQUIRED.forEach(([pg, tok, why])=>{
+    const hit = (model[pg]||[]).some(it => it.text.indexOf(tok) >= 0);
+    req.push([hit, `page ${pg} ${PAGES[pg]||'?'}：${why} <code>${esc(tok)}</code>`]);
+    if(!hit) nBad++;
+  });
+
+  diagCache = {badIdx, warnIdx, lines, req, nBad, nWarn};
+  return diagCache;
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function drawDiag(){
+  const d = checkMode ? validate() : null;
+  const el = document.getElementById('diag');
+  if(!d){ el.innerHTML = '<span class="hint">实时告警已关闭（看的是"样值"，不是最坏串的安全余量）。</span>'; return; }
+  let out = '';
+  if (d.nBad === 0) out += `<div class="ok">✓ 当前页无重叠、无出屏（最坏串口径，${PAGES.length} 页全查过）</div>`;
+  else              out += `<div class="bad">✗ ${d.nBad} 处必须修</div>`;
+  d.req.forEach(([hit, txt])=>{ out += `<div class="${hit?'ok':'bad'}">${hit?'✓':'✗'} ${txt}</div>`; });
+  d.lines.forEach(([k, txt])=>{ out += `<div class="${k}">${k==='bad'?'✗':'!'} ${txt}</div>`; });
+  if (d.nWarn) out += `<div class="wn">（另有 ${d.nWarn} 处已知贴边/超宽，参考即可）</div>`;
+  el.innerHTML = out;
 }
 
 /* ---------- ui ------------------------------------------------------ */
@@ -213,16 +374,24 @@ function buildTabs(){
   const d=document.getElementById('tabs'); d.innerHTML='';
   PAGES.forEach((n,i)=>{ const b=document.createElement('button');
     b.textContent=n; if(i===page) b.className='on';
+    const nb = diagCache && diagCache.badIdx[i] && diagCache.badIdx[i].length;
+    const nw = diagCache && diagCache.warnIdx[i] && diagCache.warnIdx[i].length;
+    if (checkMode && nb) { const s=document.createElement('span'); s.className='dot'; b.appendChild(s); }
+    else if (checkMode && nw) { const s=document.createElement('span'); s.className='dot w'; b.appendChild(s); }
     b.onclick=()=>{ page=i; sel=0; refresh(); }; d.appendChild(b); });
 }
 
 function buildList(){
   const d=document.getElementById('list'); d.innerHTML='';
+  const bad = checkMode && diagCache ? diagCache.badIdx[page] || [] : [];
+  const wn  = checkMode && diagCache ? diagCache.warnIdx[page] || [] : [];
   model[page].forEach((it,i)=>{
     const r=document.createElement('div');
-    r.className='row'+(i===sel?' sel':'');
-    r.innerHTML=`<span class="tag">${it.font}</span><span class="txt">${it.text}</span>
+    r.className='row'+(i===sel?' sel':'')+(bad.includes(i)?' bad':(wn.includes(i)?' wn':''));
+    const shown = expand(it.text, page);
+    r.innerHTML=`<span class="tag">${it.font}</span><span class="txt">${esc(it.text)}</span>
                  <span class="xy">${it.x},${it.y}</span>`;
+    r.title = shown;
     r.onclick=()=>{ sel=i; refresh(); };
     d.appendChild(r);
   });
@@ -240,11 +409,29 @@ function buildProps(){
   document.getElementById('p_align').value=it.align;
 }
 
-function refresh(){ buildTabs(); buildList(); buildProps(); render(); }
+function refresh(){
+  diagCache = checkMode ? validate() : null;
+  buildTabs(); buildList(); buildProps(); render(); drawDiag();
+}
 
 function upd(k,v){
   const it=model[page][sel]; if(!it) return;
-  it[k]=v; buildList(); render();
+  it[k]=v;
+  if(k==='font' || k==='text' || k==='align'){ diagCache=checkMode?validate():null; buildTabs(); }
+  buildList(); render();
+}
+
+function toggleWorst(){
+  worstMode=!worstMode;
+  document.getElementById('b_worst').classList.toggle('on', worstMode);
+  document.getElementById('b_worst').textContent = worstMode ? '按最坏串' : '按常见值';
+  refresh();
+}
+function toggleCheck(){
+  checkMode=!checkMode;
+  document.getElementById('b_check').classList.toggle('on', checkMode);
+  diagCache = checkMode ? validate() : null;
+  refresh();
 }
 
 function addItem(){
@@ -253,20 +440,24 @@ function addItem(){
 }
 
 /* ---------- drag ---------------------------------------------------- */
+function hitTest(mx,my){
+  let hit=-1;
+  model[page].forEach((it,i)=>{
+    const m=metrics(it);
+    if(mx>=m.l-1 && mx<=m.r+1 && my>=m.t-1 && my<=m.b+1) hit=i;
+  });
+  return hit;
+}
+
 cv.onmousedown=e=>{
   const r=cv.getBoundingClientRect();
   const mx=(e.clientX-r.left)/Z, my=(e.clientY-r.top)/Z;
-  let hit=-1;
-  model[page].forEach((it,i)=>{
-    let bx,by,bw,bh;
-    if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
-    else if(it.font==='bar'){ bw=88; bx=it.x; by=it.y+8; bh=7; }
-    else if(it.font==='big'){ bw=textOf(it).length*13; bx=Math.round((W-bw)/2); by=8+it.y*8; bh=16; }
-    else { bw=widthOf(it); bx=startX(it); by=it.y+8; bh=it.font==='tiny'?6:7; }
-    if(mx>=bx-1&&mx<=bx+bw+1&&my>=by-1&&my<=by+bh+1) hit=i;
-  });
-  if(hit>=0){ sel=hit; refresh(); const it=model[page][sel];
-    drag={dx:mx-it.x, dy:my-(it.y+(it.font==='big'?8:8))}; }
+  const hit=hitTest(mx,my);
+  if(hit>=0){
+    sel=hit; refresh();
+    const it=model[page][sel];
+    drag={dx:mx-it.x, dy:my-it.y};
+  }
 };
 
 window.onmousemove=e=>{
@@ -275,11 +466,11 @@ window.onmousemove=e=>{
   const mx=(e.clientX-r.left)/Z, my=(e.clientY-r.top)/Z;
   const it=model[page][sel]; if(!it) return;
   it.x=Math.max(0,Math.min(127,Math.round(mx-drag.dx)));
-  it.y=Math.max(0,Math.min(it.font==='big'?5:47,Math.round(my-drag.dy)));
+  it.y=Math.max(0,Math.min(it.font==='big'?5:55,Math.round(my-drag.dy)));
   buildList(); buildProps(); render();
 };
 
-window.onmouseup=()=>drag=null;
+window.onmouseup=()=>{ if(drag){ drag=null; if(checkMode){ diagCache=validate(); buildTabs(); buildList(); drawDiag(); } } };
 
 function delItem(){
   if(!model[page][sel]){ alert('先在左边列表里点中要删的那一行'); return; }
@@ -297,7 +488,7 @@ window.onkeydown=e=>{
   if(map[e.key]){ e.preventDefault();
     it.x=Math.max(0,Math.min(127,it.x+map[e.key][0]));
     it.y=Math.max(0,Math.min(it.font==='big'?5:55,it.y+map[e.key][1]));
-    buildList(); buildProps(); render(); }
+    buildList(); buildProps(); render(); diagCache=checkMode?validate():null; drawDiag(); }
 };
 
 /* ---------- import / export ---------------------------------------- */
@@ -315,7 +506,7 @@ function importJSON(inp){
   r.readAsText(f);
 }
 
-function exportC(){
+function cArray(){
   let out='/* generated by layout_editor.html */\n';
   out+='static const dph_item_t dph_layout[] =\n{\n';
   PAGES.forEach((name,p)=>{
@@ -328,16 +519,36 @@ function exportC(){
   });
   out+='};\n';
   out+='\n';  out+='#define DPH_ITEM_COUNT ((uint8_t)(sizeof(dph_layout) / sizeof(dph_layout[0])))\n';
+  return out;
+}
+
+function exportC(){
+  const out=cArray();
   const b=new Blob([out],{type:'text/plain'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(b);
   a.download='doppler_layout.h'; a.click();
   navigator.clipboard?.writeText(out);
 }
 
+function copyText(txt, label){
+  const done = ()=> alert(label + ' 已复制到剪贴板，直接粘贴发过去就行。');
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(txt).then(done, ()=>fallback());
+  else fallback();
+  function fallback(){
+    const ta=document.createElement('textarea'); ta.value=txt;
+    ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); done(); }catch(e){ alert('复制失败，用「存 JSON」落文件'); }
+    document.body.removeChild(ta);
+  }
+}
+function copyC(){ copyText(cArray(), 'C 数组'); }
+function copyJSON(){ copyText(JSON.stringify(model,null,2), 'JSON'); }
+
 /* ---------- default ------------------------------------------------- */
 function defaultModel(){
   return [
-    /* 0 */
+    /* 0 READY */
     [
       {text: '$S', font: 'tiny', x: 6, y: 0, align: 'left'},
       {text: '$N/$T', font: 'tiny', x: 126, y: 0, align: 'right'},
@@ -349,117 +560,101 @@ function defaultModel(){
       {text: '$!', font: 'tiny', x: 2, y: 49, align: 'left'},
       {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
       {text: '$R', font: 'tiny', x: 97, y: 12, align: 'left'},
-      /* 3 键切的接收带宽：底行 $!(2..65) 与 EXIT(110..125) 之间 70..93
-         （y=12 那行其实被粗体 'RX $F' 占着，别往那儿放） */
       {text: 'BW $-', font: 'tiny', x: 70, y: 49, align: 'left'},
-      /* 'AOS $B $A' 从 66 铺 105 px 会出屏右界，只留日+时、右对齐 126 */
       {text: '$B $A', font: 'tiny', x: 126, y: 32, align: 'right'},
       {text: 'SW $W', font: 'tiny', x: 2, y: 40, align: 'left'},
       {text: 'RX $F', font: 'bold', x: 3, y: 11, align: 'left'},
     ],
-    /* 1 */
+    /* 1 RUN */
     [
-      {text: 'RX $F', font: 'bold', x: 7, y: 1, align: 'left'},
-      {text: '$V $Y', font: 'tiny', x: 7, y: 12, align: 'left'},
-      {text: '$Z', font: 'tiny', x: 127, y: 18, align: 'right'},
-      {text: '', font: 'bar', x: 6, y: 45, align: 'left'},
-      {text: 'EL $E', font: 'tiny', x: 7, y: 22, align: 'left'},
-      {text: '$P%', font: 'tiny', x: 111, y: 46, align: 'right'},
-      {text: '$G km', font: 'tiny', x: 7, y: 30, align: 'left'},
-      {text: '$L', font: 'tiny', x: 118, y: 2, align: 'right'},
-      {text: '$Q', font: 'tiny', x: 103, y: 12, align: 'left'},
-      {text: '$C', font: 'tiny', x: 95, y: 38, align: 'right'},
-      {text: '$H km/s', font: 'tiny', x: 6, y: 37, align: 'left'},
-      {text: '$O Hz', font: 'tiny', x: 127, y: 32, align: 'right'},
-      {text: '$D', font: 'bold', x: 101, y: 25, align: 'right'},
-      {text: 'dB', font: 'bold', x: 103, y: 25, align: 'left'},
-      /* y=18..23 是这一页唯一整条空带：上面 '$V $Y' 收在 y=17，下面
-         'EL $E' 从 y=22 起但只到 x=38 */
-      {text: 'S$*s', font: 'tiny', x: 39, y: 18, align: 'left'},
-      {text: 'BW $-', font: 'tiny', x: 58, y: 18, align: 'left'},
-      {text: '$J', font: 'tiny', x: 127, y: 46, align: 'right'},
+      {text: 'RX $F', font: 'bold', x: 4, y: 2, align: 'left'},
+      {text: 'TX $Y', font: 'tiny', x: 4, y: 12, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 119, y: 12, align: 'right'},
+      {text: '', font: 'bar', x: 2, y: 47, align: 'left'},
+      {text: 'EL $E', font: 'tiny', x: 3, y: 23, align: 'left'},
+      {text: '$P%', font: 'tiny', x: 109, y: 48, align: 'right'},
+      {text: '$G km', font: 'tiny', x: 3, y: 31, align: 'left'},
+      {text: '$L', font: 'tiny', x: 124, y: 3, align: 'right'},
+      {text: '$Q', font: 'tiny', x: 81, y: 12, align: 'left'},
+      {text: '$C', font: 'tiny', x: 127, y: 41, align: 'right'},
+      {text: '$H km/s', font: 'tiny', x: 3, y: 39, align: 'left'},
+      {text: '$O Hz', font: 'tiny', x: 127, y: 33, align: 'right'},
+      {text: '$D', font: 'bold', x: 99, y: 21, align: 'right'},
+      {text: 'dB', font: 'bold', x: 102, y: 21, align: 'left'},
+      {text: '$*s', font: 'tiny', x: 46, y: 39, align: 'left'},
+      {text: 'BW $-', font: 'tiny', x: 64, y: 39, align: 'left'},
+      {text: '$J', font: 'tiny', x: 127, y: 48, align: 'right'},
     ],
-    /* 2 */
+    /* 2 DONE */
     [
-      {text: 'PASS COMPLETE', font: 'bold', x: 8, y: 0, align: 'left'},
-      {text: 'DUR $U', font: 'tiny', x: 15, y: 30, align: 'left'},
-      {text: 'EXIT', font: 'tiny', x: 126, y: 44, align: 'right'},
+      {text: 'PASS COMPLETE', font: 'bold', x: 7, y: 4, align: 'left'},
+      {text: 'DUR $U', font: 'tiny', x: 7, y: 35, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
       {text: '73!', font: 'bold', x: 76, y: 29, align: 'left'},
-      {text: '$S', font: 'bold', x: 15, y: 11, align: 'left'},
-      {text: 'SW $W', font: 'tiny', x: 15, y: 38, align: 'left'},
-      {text: 'MAX EL:$M', font: 'tiny', x: 15, y: 22, align: 'left'},
+      {text: '$S', font: 'bold', x: 7, y: 14, align: 'left'},
+      {text: 'SW $W', font: 'tiny', x: 7, y: 43, align: 'left'},
+      {text: 'MAX EL:$M', font: 'tiny', x: 7, y: 27, align: 'left'},
     ],
-    /* 3 */
+    /* 3 EMPTY */
     [
-      {text: '$@', font: 'bold', x: 2, y: 0, align: 'left'},
-      {text: 'EXIT', font: 'tiny', x: 126, y: 44, align: 'right'},
+      {text: '$@', font: 'bold', x: 7, y: 8, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
     ],
-    /* 4 */
+    /* 4 CLOCK */
     [
-      {text: 'SET CLOCK', font: 'bold', x: 2, y: 0, align: 'left'},
-      {text: '$C', font: 'big', x: 0, y: 1, align: 'center'},
-      {text: '$I', font: 'tiny', x: 0, y: 30, align: 'center'},
-      {text: 'TYPE MMDDHHMMSS', font: 'tiny', x: 2, y: 38, align: 'left'},
+      {text: 'SET CLOCK', font: 'bold', x: 2, y: 4, align: 'left'},
+      {text: '$C', font: 'big', x: 1, y: 2, align: 'center'},
+      {text: '$I', font: 'tiny', x: 20, y: 38, align: 'center'},
+      {text: 'TYPE MMDDHHMMSS', font: 'tiny', x: 39, y: 46, align: 'left'},
       {text: 'MENU OK', font: 'tiny', x: 2, y: 46, align: 'left'},
       {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
     ],
-    /* 5 */
+    /* 5 CALIBRATE */
     [
-      {text: 'CALIBRATE', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: 'CALIBRATE', font: 'bold', x: 2, y: 1, align: 'left'},
       {text: '1 PRESS M START', font: 'tiny', x: 2, y: 9, align: 'left'},
       {text: '2 WAIT 10-30 MIN', font: 'tiny', x: 2, y: 17, align: 'left'},
       {text: '3 TYPE HHMMSS', font: 'tiny', x: 2, y: 25, align: 'left'},
       {text: '4 PRESS MENU', font: 'tiny', x: 2, y: 33, align: 'left'},
       {text: 'EL $K   REAL $I', font: 'tiny', x: 2, y: 41, align: 'left'},
       {text: 'CAL $X', font: 'tiny', x: 2, y: 49, align: 'left'},
-      {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
     ],
-    /* 6 —— 信息页：DOPPLER 页按 5 进入（固件 sub==3），再按 5 或 EXIT 返回。
-       这里必须与 doppler_layout.h 的 page 6 逐字一致，否则从本编辑器导出
-       就会把信息页改成另一副样子（文案的真值是固件那份）。 */
+    /* 6 INFO */
     [
-      {text: 'DOPPLER INFO', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: 'DOPPLER INFO', font: 'bold', x: 2, y: 1, align: 'left'},
       {text: 'FW $# $%', font: 'tiny', x: 2, y: 9, align: 'left'},
-      {text: 'BASE F4HWN SSTV', font: 'tiny', x: 2, y: 17, align: 'left'},
-      {text: 'DEV  BG0FPJ', font: 'tiny', x: 2, y: 25, align: 'left'},
-      {text: 'PH $? $= $J', font: 'tiny', x: 2, y: 33, align: 'left'},
-      {text: 'TBL $^ T $<', font: 'tiny', x: 2, y: 41, align: 'left'},
-      {text: 'CAL $> UP $+', font: 'tiny', x: 2, y: 49, align: 'left'},
-      {text: '5/EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+      {text: 'BASE F4HWN', font: 'tiny', x: 2, y: 17, align: 'left'},
+      {text: 'DEV  BG0FPJ', font: 'small', x: 47, y: 16, align: 'left'},
+      {text: 'PH $? $= $J', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: 'TBL $^ T $<', font: 'tiny', x: 1, y: 33, align: 'left'},
+      {text: 'CAL $> UP $+', font: 'tiny', x: 2, y: 41, align: 'left'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
     ],
-    /* 7 —— 预听页（固件相位 DPH_PRE，就绪页长按 M 进来，或定时开始提前 60 秒自动进）。
-       横幅用 bold 是几何问题，不是字库问题：font 3 一格 13 px，
-       "PRE-LISTEN" 要 130 px 超过 128，而且吃两个 frame row 会压在 $F 上。
-       （固件里 doppler 的 big 走 gFontBigPacked，'!'..'~' 94 个字形都有；
-       只有主界面那套 big 用 gFontBigDigits，纯数字。） */
+    /* 7 PRE-LISTEN */
     [
-      {text: 'PRE-LISTEN', font: 'bold', x: 2, y: 0, align: 'left'},
-      {text: '$F', font: 'big', x: 0, y: 1, align: 'center'},
-      {text: '$O Hz', font: 'tiny', x: 2, y: 25, align: 'left'},
-      {text: '$D dB', font: 'tiny', x: 126, y: 25, align: 'right'},
-      {text: 'AOS $B $A', font: 'tiny', x: 2, y: 32, align: 'left'},
-      {text: '$R', font: 'tiny', x: 126, y: 32, align: 'right'},
-      {text: '$S', font: 'tiny', x: 2, y: 39, align: 'left'},
-      {text: '$C', font: 'tiny', x: 126, y: 39, align: 'right'},
-      {text: '$!', font: 'tiny', x: 2, y: 47, align: 'left'},
-      {text: 'S2TONE', font: 'tiny', x: 40, y: 47, align: 'left'},
-      {text: '$Z', font: 'tiny', x: 106, y: 47, align: 'right'},
-      {text: 'EXIT', font: 'tiny', x: 126, y: 47, align: 'right'},
+      {text: 'PRE-LISTEN', font: 'bold', x: 2, y: 1, align: 'left'},
+      {text: 'TX $Y', font: 'tiny', x: 5, y: 22, align: 'left'},
+      {text: 'AOS $B $A', font: 'tiny', x: 3, y: 48, align: 'left'},
+      {text: '$D dB', font: 'bold', x: 123, y: 32, align: 'right'},
+      {text: '$R', font: 'bold', x: 46, y: 33, align: 'right'},
+      {text: '$C', font: 'tiny', x: 88, y: 2, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 113, y: 22, align: 'right'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
+      {text: 'RX $F', font: 'bold', x: 5, y: 12, align: 'left'},
+      {text: '$Q', font: 'tiny', x: 68, y: 22, align: 'left'},
     ],
-    /* 8 —— 尾音页（固件相位 DPH_POST，数组跑完自动落到这里）。
-       $O 报的是这一页真正停着的偏移（含 ▲▼ 手动拧的那几格），
-       $D 是这一页存在的理由：看折射尾巴上还有没有信号。 */
+    /* 8 POST-LISTEN */
     [
-      {text: 'POST-LISTEN', font: 'bold', x: 2, y: 0, align: 'left'},
-      {text: '$F', font: 'big', x: 0, y: 1, align: 'center'},
-      {text: '$O Hz', font: 'tiny', x: 2, y: 25, align: 'left'},
-      {text: '$D dB', font: 'tiny', x: 126, y: 25, align: 'right'},
-      {text: 'DUR $U  MAX $M', font: 'tiny', x: 2, y: 32, align: 'left'},
-      {text: '$S', font: 'tiny', x: 2, y: 39, align: 'left'},
-      {text: '$C', font: 'tiny', x: 126, y: 39, align: 'right'},
-      {text: 'S2 TONE', font: 'tiny', x: 2, y: 47, align: 'left'},
-      {text: '$Z', font: 'tiny', x: 106, y: 47, align: 'right'},
-      {text: 'EXIT', font: 'tiny', x: 126, y: 47, align: 'right'},
+      {text: 'POST-LISTEN', font: 'bold', x: 2, y: 1, align: 'left'},
+      {text: 'TX $Y', font: 'tiny', x: 5, y: 22, align: 'left'},
+      {text: '$D dB', font: 'bold', x: 123, y: 32, align: 'right'},
+      {text: '$C', font: 'tiny', x: 120, y: 2, align: 'right'},
+      {text: '$Z', font: 'tiny', x: 113, y: 22, align: 'right'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 46, align: 'right'},
+      {text: 'RX $F', font: 'bold', x: 5, y: 12, align: 'left'},
+      {text: '$Q', font: 'tiny', x: 68, y: 22, align: 'left'},
+      {text: '73!', font: 'bold', x: 21, y: 39, align: 'left'},
     ],
   ];
 }

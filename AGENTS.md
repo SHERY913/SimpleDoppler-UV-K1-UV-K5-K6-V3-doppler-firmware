@@ -1,0 +1,122 @@
+# 多普勒 —— 给 AI 的唯一必读文件
+
+卫星多普勒跟踪固件（F4HWN SSTV v6.3.0 基座 + 多普勒页，作者 BG0FPJ）。
+PC 算过境、把「频率随时间怎么变」的表写进电台外部 flash；电台按表 10 ms 一拍改 BK4819
+频率字，全程不碰静噪/音频通路。表区 `0x162000..0x172000`（64 KiB），格式 v5，proto 7。
+
+## 目录
+
+```
+固件源码/uvk1-v6.3.0/   C 固件（独立 git 仓）。入口 App/app/doppler.c（5486 行）、
+                        doppler.h、doppler_layout.h（9 个页面的坐标表，脚本生成）；
+                        路由在 App/app/app.c 搜 DISPLAY_DOPPLER；串口协议 App/app/uart.c
+安卓App/android-app/    Kotlin App（独立 git 仓）。样点区常量仍是 0x3000 → 写表判 BAD LAYOUT
+PC工具/多普勒工具/      doppler_tool.py + radio_proto.py + verify_*.py 回归网（48 文件平铺，别通读）
+交付/                   当前 bin/apk（不带日期）+ 历史-YYYYMMDD/（回滚用）
+tests/sim/              PC 上的"假电台"：把 doppler.c 原样编到宿主，桩掉孔芯片，
+                        断言频合/功率/相位事件流。固件源码零改动，见它的 README
+文档/历史/              44 份旧交接与审计。需要某个历史结论时按名字点名取，别通读
+数据/sat_freq.json      频点唯一真源
+```
+
+## 命令
+
+```bash
+# 编固件（工具链在 <workspace>/tc/root/mingw64/bin）→ 产物 .gobj/f4hwn.sstv.bin
+cd 多普勒/固件源码/uvk1-v6.3.0 && PATH=<workspace>/tc/root/mingw64/bin:$PATH \
+  PYTHONIOENCODING=utf-8 python .gfw.py
+# 回归（离线六层；后三层要电台/MuMu）
+cd 多普勒/PC工具/多普勒工具 && bash verify_all.sh --fast
+# 假电台仿真（不需要硬件，不改固件源码）：m0 空表 / s1 预听松手 / s2 就绪松手
+#   / s3 功率还原 / s4 整趟 600 s / s1h 长按 M 进预听 / s5 侧键一起发 / s6 纯接收星侧键二
+#   / s7 ▲▼ 改步进 / s8 预听·尾音页 TX 频率 / all（all 先跑两个静态守卫再跑全部场景）
+bash 多普勒/tests/sim/build.sh all
+# 阳性对照：先删掉某条修复，看对应场景是否变红（1..15，跑完自动还原源码；
+#   10/11 守的是仿真编不到的 app.c 派发层与版面几何，12~15 守 E6/版面常驻/READY-PTT/方向）
+bash 多普勒/tests/sim/negctl.sh 9
+# 版面：操作员在排版器里排完「复制 JSON」→ 一条命令同时落固件与编辑器（别手改 doppler_layout.h）
+python 多普勒/PC工具/多普勒工具/gen_layout.py "<导出的.json>" "2026-11-02 01:09"
+python 多普勒/PC工具/多普勒工具/verify_layout.py     # 排版器 defaultModel ↔ 固件表逐条一致
+python 多普勒/tests/sim/check_layout_overlap.py      # 像素级重叠/出屏/内容要求
+# 打开排版器（画布 128×56，与真机逐像素对应；走 http 是为了剪贴板可用）
+多普勒/PC工具/多普勒工具/打开排版器.bat
+# 打 exe → 产物复制成桌面 DopplerPass.exe（文件名不随构建变）
+python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/build \
+  F4HWN-Doppler-Tool.spec
+```
+
+## 当前状态（2026-11-02，交接-31：第三轮 E6~E9 全部收口 + 版面交给操作员自排）
+
+- 交付固件 `交付/f4hwn.sstv.doppler.bin` = 106,648 B / `a529bf72…`（`Nov  2 2026` / `01:10:13`）；
+  表格式 v5、proto 7，**旧表通用，重刷不必重写表**。历史版在 `交付/历史-20261101/`，桌面那份已同步。
+- 交接-26 修了三条（读代码读出，详见 `文档/历史/项目交接-26.md`）：
+  ① `DPH_TxApply` 没同步 `last_freq` → 预听/尾音页松手后接收机停在上行频点（`:904` 补一行）
+  ② `DPH_PttEvent` 松手分支漏 READY → 就绪页松手不回（`:3358` 补一支）
+  ③ 拨 5 W 抢在 `DPH_Enter()` 之前 → 退页把操作员信道功率改成 5 W（`:2777` 挪位 + `radio_saved` 守卫）
+- 交接-27 修了两条（**仿真跑出来的**，详见 `文档/历史/项目交接-27.md`）：
+  ④ 长按 M 的预听/武装在真机派发顺序下**从来进不去**（app.c 先派发短按）→ 短按改成挂起
+     `menu_tap_pending`，松手时才 `DPH_BeginRun()`
+  ⑤ `DPH_OffsetAt`/`DPH_AngleAt` 越过末样点后 `frac` 仍取模 → 尾段整段回放一格、LOS 点从没精确显示
+     → 越界直接钉在 `pts-1`
+- 交接-28 修了五条（**真机报的**，详见 `文档/历史/项目交接-29.md`）：
+  ⑥ E5 `DPH_StepKey` 用 `(uint32_t)el >= total` 判上界 → 合法负 el 变 40 亿 → 按 ▲▼ 直接跳尾音页
+     （`:2684` 改有符号比较）
+  ⑦ E1 发射中 PTT 抬起在 `app.c:2753` 就被 `GENERIC_Key_PTT` 吃掉 → `DPH_PttEvent(false)` 从不被调
+     → `ptt_down` 永停 true → 侧键一只换亚音不起发（app.c 补抬起回调 + `doppler.c:3353` 补准入失败的松手兜底）
+  ⑧ E2 纯接收星上侧键二**必然**只双响（`DPH_CycleTone` 的 `up10==0` 早退，已删）+ 发射那一拍屏请求
+     在 `DISPLAY_MAIN` 键落进 1750 Hz 分支（侧键二拦截补 `DOPPLER_IsActive()`）
+  ⑨ E3 跟踪页 `S$*s`/`BW $-` 挤在 39/58 → `STEP $*s`(39) + `BW $-`(74)
+  ⑩ E4 预听页/尾音页补 `TX $Y`（y=24：big 字实占 8..23）
+- **交接-29 那一版（`29b0684e…`）真机上验了**：E1~E4 的修复成立（▲▼ 不再跳页、版面成立），
+  但又顶出四条更深的问题，写在 `文档/历史/项目交接-30.md`：
+  ⑪ E6 侧键一在**就绪页也能发射**（准入里一直有 READY），而且按下后**载波关不掉** ——
+     `DPH_So50Release()` 用 `ptt_down` 判"PTT 还按着"，可按下侧键一时 `DPH_PttEvent`
+     恰好把它写成 true → 松手永远走"只换亚音"那一支，没人调 `GENERIC_Key_PTT(false)`；
+     载波还出着，按数字键就听见 DTMF（同一个故障的两个表现）
+  ⑫ E7 跟踪页 ▲▼ **改了原点但屏上一个像素都不动**：`$L`/`$P` 用被钳成 0 的 `elapsed`，
+     提前开始那段恒等于整趟长度（E5 修好之后才看得见的下一层）
+  ⑬ E8 侧键二在**表值恰为 67.0** 的星上是死键：音环里"表值 → 67.0"那条特例，
+     `next` 还是 67.0（真机 `$Z` 正是 `T67.0`）
+  ⑭ E9 版面：`$O`(32) 与粗体 `$D`(25..31) 之间 0 空行；`STEP`/`BW` 常驻太丑
+- 交接-31 把这四条编进交付，并补了操作员当场报的三条（详见 `文档/历史/项目交接-31.md`）：
+  ⑮ **READY 页 PTT 也不许发射**：`doppler.c:3317` 新闸门（双响、不写芯片、不上屏）+ `:3347` 准入删 READY；
+     侧键一走同一个闸门 —— app.c 只拦**抬起**，按下沿一直是后门
+  ⑯ **RUN 的 ▲▼ 方向**：`doppler.c:2673` `dir = (Key==KEY_UP) ? -1 : 1`（**▼ 往前、▲ 往后**）；
+     就绪页的 ▲▼ 换条目，方向不动
+  ⑰ **进度范围**：`doppler.c:2706` 钳 `[0, total-1]`，两头停住；不再能拧到 -100000 s
+- **版面从交接-31 起由操作员自排**：`PC工具/多普勒工具/layout_editor.html`（128×56 画布、worst-case 实时告警、
+  复制 JSON/C 数组）+ `gen_layout.py` 一条命令落盘。`doppler_layout.h` 是生成物，别手改。
+- 防线：`verify_layout.py` 要求每处 `BK4819_SetFrequency(` 所在函数有真赋值 `last_freq =`；
+  `tests/sim` **15 条阳性对照**（`negctl.sh 1..15`，破坏修复→场景必红）与 **42 条断言**（`build.sh all`）；
+  `check_layout_overlap.py`（版面像素级重叠 + 内容要求）与 `check_dispatch.py`
+  （app.c 派发层三条结构约束，补 sim 编不到 app.c 的那个洞）已接进 `build.sh all`。
+- 挂账：双键同按（操作员决定不修）、APK 1.5 写的表判 `BAD LAYOUT`、zip 内 bin 仍 `29b0684e…`、D5 未验证。
+
+## 待办（按优先级）
+
+1. ~~交接-30 的四条改动编译~~ **已完成（交接-31）**：已过编译器、已补断言与 `negctl 12..15`、
+   已换 `交付/` 与桌面、README 指纹行已同步。剩下的只有上机验。
+2. **上机验 E6~E9 与 D5**（验法见交接-30 §八第 4 条）。D1~D4 已通过，D5 至今无人验。
+3. **上机验 E1~E5 + D1~D5 一共十条**（每条 1 分钟；E 那五条怎么验写在
+   `文档/历史/项目交接-29.md` §二~五各段末尾，D 那五条见 `-26.md` §二~四、`-27.md` §二~三）。
+   **这十条一条都没上过真机。**
+4. 重 dump 三份外部 flash 镜像到 `verify/fixtures/`（原在 `多普勒/临时/`，已随清理删除），
+   否则 8/9 那三条真实对照一直跳空。**别再放 `临时/`，那是清理目标。**
+5. 重打 APK：把 `DPH_SAMPLE_OFF` 对齐 0x1000，手机写表才通。
+6. `文档/历史/项目交接-25.md` §七 的 12 步上机清单，一条都没验过。
+7. 已知未修：手机交还后停在 AOS 偏移（`DOPPLER_SetExtControl` 末尾）；`DPH_TuneSafe`
+   只看 `gCurrentFunction` 有 PTT 时间窗；`sub != 0` 时武装倒计时被挂起（AOS 过去会静默丢武装）；
+   侧键一长按是否重复回调（`so50_prev_*` 被覆盖后还原不回）；`DPH_Enter()` 不清 `ptt_down`
+   （交接-28 只在松手时兜了一句，状态机仍不完整）。
+8. 仿真覆盖不到的三块（交接-29 §八）：`app.c` 派发只能静态守；`GENERIC_Key_PTT` 是桩，
+   `RADIO_PrepareTX` 的拒发闸门一条都没走过；亚音只能语义观测，看不到 BK4819 寄存器。
+
+## 硬规矩
+
+- **编译绿 + 自检绿 ≠ 能用**；**注释说它做了 ≠ 代码真做了**。这个项目绝大多数修复没上过真机。
+- 改固件 → 重编 → 换 `交付/` → 跑 `verify_all.sh --fast`，三件缺一不可。
+- 每修一条缺陷，同时加一条能抓它的 `tests/sim` 断言 + 一条 `negctl.sh` 阳性对照
+  （删掉修复 → 场景必须红，放回去 → 必须绿）。**只有绿、没有红过的测试等于没有测试。**
+- 三个 git 仓常同轮有未提交改动：**禁 `git checkout .` / `git restore .`**；**不擅自 commit**。
+- 交付件是可再生产物。bin 的 md5 每次重编都变（镜像里编进 `__DATE__`/`__TIME__`），
+  **md5 不是源码指纹**；认源码读 `0x0772` 回包（版本串 + ppm + proto + phase）。
