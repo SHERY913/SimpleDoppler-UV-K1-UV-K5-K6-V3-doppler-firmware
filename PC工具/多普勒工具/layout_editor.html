@@ -79,7 +79,8 @@
       <code>$C</code> 时钟 &nbsp; <code>$K</code> 校准计时 &nbsp; <code>$X</code> 校准系数 &nbsp;
       <code>$R</code> 距 AOS 秒 &nbsp; <code>$I</code> 输入区 &nbsp; <code>$Q</code> 功率 &nbsp; <code>$J</code> APP 角标<br>
       <span>26 个字母用完之后新增的（符号占位符）：</span><br>
-      <code>$!</code> ARMED/M START &nbsp; <code>$@</code> 空表原因 &nbsp; <code>$V</code> 校准系数（校准页）<br>
+      <code>$!</code> ARMED/M RUN &nbsp; <code>$@</code> 空表原因 &nbsp; <code>$V</code> 校准系数（校准页）<br>
+      <code>$*</code> 跟踪步长（1 键选的 1/2/5/10 秒） &nbsp; <code>$-</code> 接收带宽（3 键切 25k/12k）<br>
       <b>信息页（INFO，page 6）：</b><code>$#</code> 固件版本 &nbsp; <code>$%</code> 编译日期 &nbsp;
       <code>$&amp;</code> 编译时间 &nbsp; <code>$?</code> phase 号 &nbsp; <code>$=</code> 电池电压 &nbsp;
       <code>$^</code> 表条数+表日期 &nbsp; <code>$&lt;</code> 调谐次数 &nbsp; <code>$&gt;</code> 校准 ppm &nbsp;
@@ -94,17 +95,19 @@
 <script src="fonts_data.js"></script>
 <script>
 const W=128, H=64, Z=6;
-const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE','INFO'];
+const PAGES=['READY','RUN','DONE','EMPTY','CLOCK','CALIBRATE','INFO','PRE-LISTEN','POST-LISTEN'];
 const SAMPLE={ $F:'145.7976', $E:'42', $D:'<-125', $O:'-2360', $P:'60', $L:'-04:12',
                $U:'06:18', $N:'1', $T:'17', $M:'68', $A:'10:20', $W:'6.5K',
                $S:'RS-44 & BR', $C:'22:41:07', $K:'12:34', $X:'1.0062',
                $R:'04:12', $I:'------', $Q:'5W', $Y:'145.98900', $Z:'T67.0', $J:'APP',
                $G:'475', $H:'-0.8', $B:'10-26',
                /* 符号占位符：$ 后面跟符号不是合法的 JS 标识符，键必须加引号。 */
-               '$!':'M  START', '$@':'NO TABLE', '$V':'1.0062',
+               '$!':'M RUN', '$@':'NO TABLE', '$V':'1.0062',
                /* 信息页（page 6）专用，全部只读 */
                '$#':'v6.3.0', '$%':'Oct 27 2026', '$&':'23:05:56', '$?':'1',
-               '$=':'7.9V', '$^':'17 26-10-27', '$<':'128', '$>':'+12', '$+':'3h12m' };
+               '$=':'7.9V', '$^':'17 26-10-27', '$<':'128', '$>':'+12', '$+':'3h12m',
+               /* RUN 页 ▲▼ 步进（数字键 1 循环 1/2/5/10 s） */
+               '$*':'3', '$-':'25k' };
 
 let model = null, page = 0, sel = 0, drag = null;
 
@@ -339,22 +342,26 @@ function defaultModel(){
       {text: '$S', font: 'tiny', x: 6, y: 0, align: 'left'},
       {text: '$N/$T', font: 'tiny', x: 126, y: 0, align: 'right'},
       {text: 'TX $Y', font: 'tiny', x: 3, y: 21, align: 'left'},
-      {text: '$Z', font: 'tiny', x: 76, y: 21, align: 'right'},
+      {text: '$Z', font: 'tiny', x: 127, y: 21, align: 'right'},
       {text: 'EL $M', font: 'tiny', x: 2, y: 32, align: 'left'},
-      {text: 'DUR $U', font: 'tiny', x: 90, y: 40, align: 'left'},
+      {text: 'DUR $U', font: 'tiny', x: 126, y: 40, align: 'right'},
       {text: '$C', font: 'tiny', x: 104, y: 0, align: 'right'},
-      {text: 'M  START', font: 'tiny', x: 2, y: 49, align: 'left'},
+      {text: '$!', font: 'tiny', x: 2, y: 49, align: 'left'},
       {text: 'EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
       {text: '$R', font: 'tiny', x: 97, y: 12, align: 'left'},
-      {text: 'AOS $B $A', font: 'tiny', x: 66, y: 32, align: 'left'},
+      /* 3 键切的接收带宽：底行 $!(2..65) 与 EXIT(110..125) 之间 70..93
+         （y=12 那行其实被粗体 'RX $F' 占着，别往那儿放） */
+      {text: 'BW $-', font: 'tiny', x: 70, y: 49, align: 'left'},
+      /* 'AOS $B $A' 从 66 铺 105 px 会出屏右界，只留日+时、右对齐 126 */
+      {text: '$B $A', font: 'tiny', x: 126, y: 32, align: 'right'},
       {text: 'SW $W', font: 'tiny', x: 2, y: 40, align: 'left'},
       {text: 'RX $F', font: 'bold', x: 3, y: 11, align: 'left'},
     ],
     /* 1 */
     [
       {text: 'RX $F', font: 'bold', x: 7, y: 1, align: 'left'},
-      {text: 'TX $Y', font: 'tiny', x: 7, y: 12, align: 'left'},
-      {text: '$Z', font: 'tiny', x: 89, y: 12, align: 'right'},
+      {text: '$V $Y', font: 'tiny', x: 7, y: 12, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 127, y: 18, align: 'right'},
       {text: '', font: 'bar', x: 6, y: 45, align: 'left'},
       {text: 'EL $E', font: 'tiny', x: 7, y: 22, align: 'left'},
       {text: '$P%', font: 'tiny', x: 111, y: 46, align: 'right'},
@@ -363,9 +370,14 @@ function defaultModel(){
       {text: '$Q', font: 'tiny', x: 103, y: 12, align: 'left'},
       {text: '$C', font: 'tiny', x: 95, y: 38, align: 'right'},
       {text: '$H km/s', font: 'tiny', x: 6, y: 37, align: 'left'},
+      {text: '$O Hz', font: 'tiny', x: 127, y: 32, align: 'right'},
       {text: '$D', font: 'bold', x: 101, y: 25, align: 'right'},
       {text: 'dB', font: 'bold', x: 103, y: 25, align: 'left'},
-      {text: '$J', font: 'tiny', x: 127, y: 32, align: 'right'},
+      /* y=18..23 是这一页唯一整条空带：上面 '$V $Y' 收在 y=17，下面
+         'EL $E' 从 y=22 起但只到 x=38 */
+      {text: 'S$*s', font: 'tiny', x: 39, y: 18, align: 'left'},
+      {text: 'BW $-', font: 'tiny', x: 58, y: 18, align: 'left'},
+      {text: '$J', font: 'tiny', x: 127, y: 46, align: 'right'},
     ],
     /* 2 */
     [
@@ -379,7 +391,7 @@ function defaultModel(){
     ],
     /* 3 */
     [
-      {text: 'NO DATA', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: '$@', font: 'bold', x: 2, y: 0, align: 'left'},
       {text: 'EXIT', font: 'tiny', x: 126, y: 44, align: 'right'},
     ],
     /* 4 */
@@ -407,13 +419,47 @@ function defaultModel(){
        就会把信息页改成另一副样子（文案的真值是固件那份）。 */
     [
       {text: 'DOPPLER INFO', font: 'bold', x: 2, y: 0, align: 'left'},
-      {text: 'FW $# PROTO6', font: 'tiny', x: 2, y: 9, align: 'left'},
-      {text: 'BLD $% $&', font: 'tiny', x: 2, y: 17, align: 'left'},
-      {text: 'BY F4HWN+DPH', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: 'FW $# $%', font: 'tiny', x: 2, y: 9, align: 'left'},
+      {text: 'BASE F4HWN SSTV', font: 'tiny', x: 2, y: 17, align: 'left'},
+      {text: 'DEV  BG0FPJ', font: 'tiny', x: 2, y: 25, align: 'left'},
       {text: 'PH $? $= $J', font: 'tiny', x: 2, y: 33, align: 'left'},
       {text: 'TBL $^ T $<', font: 'tiny', x: 2, y: 41, align: 'left'},
       {text: 'CAL $> UP $+', font: 'tiny', x: 2, y: 49, align: 'left'},
       {text: '5/EXIT', font: 'tiny', x: 126, y: 49, align: 'right'},
+    ],
+    /* 7 —— 预听页（固件相位 DPH_PRE，就绪页长按 M 进来，或定时开始提前 60 秒自动进）。
+       横幅用 bold 是几何问题，不是字库问题：font 3 一格 13 px，
+       "PRE-LISTEN" 要 130 px 超过 128，而且吃两个 frame row 会压在 $F 上。
+       （固件里 doppler 的 big 走 gFontBigPacked，'!'..'~' 94 个字形都有；
+       只有主界面那套 big 用 gFontBigDigits，纯数字。） */
+    [
+      {text: 'PRE-LISTEN', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: '$F', font: 'big', x: 0, y: 1, align: 'center'},
+      {text: '$O Hz', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: '$D dB', font: 'tiny', x: 126, y: 25, align: 'right'},
+      {text: 'AOS $B $A', font: 'tiny', x: 2, y: 32, align: 'left'},
+      {text: '$R', font: 'tiny', x: 126, y: 32, align: 'right'},
+      {text: '$S', font: 'tiny', x: 2, y: 39, align: 'left'},
+      {text: '$C', font: 'tiny', x: 126, y: 39, align: 'right'},
+      {text: '$!', font: 'tiny', x: 2, y: 47, align: 'left'},
+      {text: 'S2TONE', font: 'tiny', x: 40, y: 47, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 106, y: 47, align: 'right'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 47, align: 'right'},
+    ],
+    /* 8 —— 尾音页（固件相位 DPH_POST，数组跑完自动落到这里）。
+       $O 报的是这一页真正停着的偏移（含 ▲▼ 手动拧的那几格），
+       $D 是这一页存在的理由：看折射尾巴上还有没有信号。 */
+    [
+      {text: 'POST-LISTEN', font: 'bold', x: 2, y: 0, align: 'left'},
+      {text: '$F', font: 'big', x: 0, y: 1, align: 'center'},
+      {text: '$O Hz', font: 'tiny', x: 2, y: 25, align: 'left'},
+      {text: '$D dB', font: 'tiny', x: 126, y: 25, align: 'right'},
+      {text: 'DUR $U  MAX $M', font: 'tiny', x: 2, y: 32, align: 'left'},
+      {text: '$S', font: 'tiny', x: 2, y: 39, align: 'left'},
+      {text: '$C', font: 'tiny', x: 126, y: 39, align: 'right'},
+      {text: 'S2 TONE', font: 'tiny', x: 2, y: 47, align: 'left'},
+      {text: '$Z', font: 'tiny', x: 106, y: 47, align: 'right'},
+      {text: 'EXIT', font: 'tiny', x: 126, y: 47, align: 'right'},
     ],
   ];
 }

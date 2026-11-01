@@ -297,6 +297,69 @@ def check_gates():
     except ValueError as exc:
         ok(f"{len(many)} 条被拒：{str(exc)[:34]}…")
 
+    # 本地日偏移只有 4 bit（条目 flags 的 [3:0]）。这里以前 `& 0x0F` 静默折回：
+    # 跨到第 16 天那趟在电台上显示成"表头那天"，倒计时跟着错，而构表和
+    # validate_table 双双放行。
+    # 下面全部用**字面量 15/16/17**，不从 core.DPH_DAY_MAX 推导：这条要钉的是
+    # 格式的物理上限，用被测常量推导期望的话，把上限改成 100 时这条会跟着
+    # 一起放宽 —— 那就又是一条永绿的绿线。
+    DAY_BITS = 15                              # 4 bit 能表达的最大值，改不了的物理事实
+    if core.DPH_DAY_MAX != DAY_BITS:
+        bad(f"PC 的 DPH_DAY_MAX = {core.DPH_DAY_MAX}，而条目的日偏移只有 4 bit，"
+            f"最大 {DAY_BITS} —— 常量放宽了，写出来的表会被折回")
+    else:
+        ok(f"DPH_DAY_MAX = {DAY_BITS}，正好是 4 bit 的物理上限")
+
+    def spread(n):
+        """把同一条真实过境按整天往后挪 n 份，本地时间-日期偏移正好 0..n-1。"""
+        b = passes[0]
+        out = []
+        for k in range(n):
+            q = core.Pass()
+            shift = dt.timedelta(days=k)
+            q.aos, q.los, q.tca = b.aos + shift, b.los + shift, b.tca + shift
+            q.max_el, q.aos_el, q.name = b.max_el, b.aos_el, b.name
+            q.samples = list(b.samples)
+            out.append(q)
+        return out
+
+    import struct as _st
+    try:
+        core.build_table(spread(DAY_BITS + 2), FREQ10, core.DPH_STEP_S_DEFAULT, tz_hours=8)
+        bad(f"跨 {DAY_BITS + 2} 个本地日的表竟然通过 —— 最后一趟的日期会被折回第 0 天")
+    except ValueError as exc:
+        ok(f"跨 {DAY_BITS + 2} 个本地日被拒：{str(exc)[:30]}…")
+    edge = None
+    try:
+        edge = core.build_table(spread(DAY_BITS + 1), FREQ10,
+                                core.DPH_STEP_S_DEFAULT, tz_hours=8)
+    except ValueError as exc:
+        bad(f"边界内（{DAY_BITS + 1} 个本地日）的表反而构不出来：{str(exc)[:40]}…"
+            " —— 闸门收得太紧或这道检查的样例有问题")
+    if edge is not None:
+        day_flags = [_st.unpack_from("<16sIIIHHHHHBB", edge,
+                                     core.DPH_HDR + i * core.DPH_ENTRY)[9]
+                     for i in range(DAY_BITS + 1)]
+        if max(day_flags) == DAY_BITS and len(set(day_flags)) == DAY_BITS + 1:
+            ok(f"边界内照常写：{len(day_flags)} 趟的日偏移 0..{max(day_flags)} 各不相同")
+        else:
+            bad(f"{DAY_BITS + 1} 个本地日的表读回来的日偏移是 {day_flags} —— 闸门或排版有问题")
+
+    # 同一条闸门的**另一半**：`day_idx < 0`（队列倒着排）。`>15` 那支一直有用例，
+    # 这支只有实现没有测试 —— 删掉它的后果是 `struct.pack("<…B", 负数)` 当场抛
+    # 一句 nobody 看得懂的格式化错误（变异验过：`error 'B' format requires
+    # 0 <= number <= 255`），而不是§一说好的那句人话；哪天再把 `& 0x0F` 加回来，
+    # 就退回"静默折回成错误日期"。两种都不能靠人记住，所以这条必须有用例。
+    # 表头取的是 passes[0]，所以把两条前后颠倒就得到负偏移。
+    two = spread(2)
+    try:
+        core.build_table([two[1], two[0]], FREQ10, core.DPH_STEP_S_DEFAULT, tz_hours=8)
+        bad("倒着排的表竟然通过 —— 后一趟的日偏移是负数，会被折回成一个错误日期")
+    except ValueError as exc:
+        ok(f"倒序被拒（日偏移为负）：{str(exc)[:34]}…")
+    except Exception as exc:                           # noqa: BLE001
+        bad(f"倒序被拦下了，但不是人话错误：{type(exc).__name__} {str(exc)[:40]}")
+
 
 def check_ownership():
     hdr("归属：表区里不是我们的东西时，擦之前就得说不")

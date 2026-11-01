@@ -8,7 +8,8 @@
 
 | 想知道 | 读这份 |
 |---|---|
-| **当前待办工单（先看这份）** | `项目交接-18.md` —— 外部 flash 地盘危机：表区里躺着 156 KiB 未知数据，64 趟上限是错的 |
+| **当前待办工单（先看这份）** | `项目交接-25.md` —— 三条真缺陷（发射中改频 / 交还控制权写进操作员信道 / 提前开始整趟偏移）+ 步进可调、SO-50 侧键一、侧键二换亚音、3 键带宽、功率三档、按键全局重排、M 键语义重写、预听页 EXIT 回就绪、F 长按键盘锁、就绪/跟踪页版面 6 处重叠与出屏修复；**交付件已换成 `5a797307…` / 106,416 B**；**§七 是上机清单，12 步一条都没验过**；APK 仍未重打（手机写表仍不通） |
+| 上一份工单（历史，四条修复仍有效） | `项目交接-24.md` —— 预听/尾音页缺 `$Z`、发射中换亚音芯片不跟、`$Y` 注释背书不存在的补偿、PC 满容表被自检拒写 |
 | 项目现在什么样、改动来龙去脉 | `项目交接-17.md`（已完工的部分），其余按编号倒序都是历史 |
 | 外部 flash 谁住哪、过境表能占多大 | 交接-17 §二（权威表在 `App/driver/mb_flash.h`；三条编译期断言钉边界） |
 | 改了啥 | `整改清单-2026-10-28.md`（按轮次追加的流水账） |
@@ -50,10 +51,11 @@
    `sat_freq.py`、`refresh_tle.py`、`tle_sources.py`、`gen_sat_freq.py`、
    `serial_bridge.py`（给手机用的 7878 桥）、`find_port.py`、`probe_fw.py`、
    `layout_editor.html`（排版器，唯一一份，App 仓里那份已删）。
-2. **回归网**（改任何一端都要跑）：`verify_all.sh` 串起 8 层，
+2. **回归网**（改任何一端都要跑）：`verify_all.sh` 串起 9 层，
    实现在 `verify_three_way / verify_link_ask / verify_layout / verify_crc /
-   verify_data / verify_sgp4.sh / verify_doppler_rate / verify_display`。
-   离线跑 `bash verify_all.sh --fast`（不要设备），插了模拟器再跑全量补第 8 层。
+   verify_data / verify_sgp4.sh / verify_doppler_rate / verify_table_fit /
+   verify_display`。
+   离线跑 `bash verify_all.sh --fast`（不要设备），插了模拟器再跑全量补第 9 层。
    另有 `verify_table_write.py`、`verify_table_live.py`、`audit_table_error.py` 要真机。
 3. **真机探针**：`硬件测试/hw_*.py` 9 个。`hw_accept.py` 是验收判据（10-28 COM7 跑过 22/22），
    **`hw_which_fw.py` 是它的第一个动作**——读串口之前不确认电台里跑的是哪套固件，后面所有结论都不成立。

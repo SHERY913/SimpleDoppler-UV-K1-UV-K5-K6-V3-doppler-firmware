@@ -39,7 +39,13 @@ F_MAIN_KT = KT / "MainScreen.kt"
 F_PROTO = HERE / "radio_proto.py"
 F_LAYOUT = FW / "doppler_layout.h"
 F_MB_H = FW.parent / "driver" / "mb_flash.h"   # 外部 flash 布局的权威表
+F_ST7565 = FW.parent / "driver" / "st7565.h"   # LCD 的物理尺寸（夹紧的参照）
 F_EDITOR = HERE / "layout_editor.html"
+F_CLEAR = HERE / "clear_table.py"              # 也照着表头标识决定放不放行擦除
+F_DETAIL_KT = KT / "ui" / "DetailScreen.kt"    # App 的擦除闸门
+F_DOC = HERE / "多普勒使用说明.md"
+F_FLASH_MAP = ROOT / "文档" / "外部flash空间地图-实测.md"
+F_DELIV = ROOT / "交付" / "README.md"
 
 BAD: list[str] = []
 WARN: list[str] = []
@@ -54,11 +60,17 @@ def read(p: Path) -> str:
 
 
 def check(label: str, got: dict[str, object]) -> None:
-    """got: 端名 -> 该端的值。全部相等才绿。"""
+    """got: 端名 -> 该端的值。全部相等才绿；**声明了却解析不到的那一端也判红**。
+    原来只要求"至少两端有值"，于是三端里掉了一端照样绿（屏幕上写 2 端一致，
+    读的人以为比过了）—— 而"某一端把常量改了名/删了"正是这条要抓的事。"""
     vals = {k: v for k, v in got.items() if v is not None}
     if len(vals) < 2:
         BAD.append(f"{label}：只有 {list(vals)} 一端有值，其余端解析不到 —— 检查本身失效了")
         return
+    if len(vals) < len(got):
+        miss = "、".join(k for k, v in got.items() if v is None)
+        BAD.append(f"{label}：{miss} 解析不到 —— 这条当下只比了 {len(vals)} 端，"
+                   f"掉的那一端改了也不会有人知道")
     uniq = set(map(repr, vals.values()))
     if len(uniq) == 1:
         OK.append(f"{label} = {next(iter(vals.values()))!r}（{len(vals)} 端一致）")
@@ -157,7 +169,8 @@ def main() -> int:
     cdef = c_defines(dop_h, ["DPH_BASE_ADDR", "DPH_CAL_ADDR", "DPH_REGION_SIZE",
                              "DPH_HDR_SIZE", "DPH_ENTRY_SIZE", "DPH_PT_SIZE",
                              "DPH_VERSION", "DPH_VERSION_MIN", "DPH_ENTRY_MAX",
-                             "DPH_PASS_MAX"])
+                             "DPH_PASS_MAX", "DPH_SAMPLE_OFF", "DPH_STEP_MS_MIN",
+                             "DPH_DUR_S_MAX", "DPH_MAGIC"])
     mb_h = read(F_MB_H)
     sonic = c_defines(mb_h, ["MB_SONIC_RESERVE_BASE"]).get("MB_SONIC_RESERVE_BASE")
     for label, typedef, py_fmt, kt_lo, kt_hi in (
@@ -196,14 +209,16 @@ def main() -> int:
     # ── 3. flash 地址与尺寸常量 ──
     pydef = {}
     for n in ["DPH_BASE", "DPH_VERSION", "DPH_HDR", "DPH_ENTRY", "DPH_ENTRY_MAX",
-              "DPH_SAMPLE_OFF", "DPH_REGION", "DPH_PT_SIZE", "DPH_PASS_MAX"]:
+              "DPH_SAMPLE_OFF", "DPH_REGION", "DPH_PT_SIZE", "DPH_PASS_MAX",
+              "DPH_STEP_MS_MIN", "DPH_DUR_S_MAX", "DPH_DAY_MAX"]:
         m = re.search(rf"^{n} = (\S+)", core, re.M)
         if m:
             pydef[n] = int(m.group(1).split("#")[0], 0)
     ktdef = {}
     for cn, key in (("BASE", "DPH_BASE_ADDR"), ("SAMPLE_OFF", None), ("HDR", "DPH_HDR_SIZE"),
                     ("ENTRY", "DPH_ENTRY_SIZE"), ("ENTRY_MAX", "DPH_ENTRY_MAX"),
-                    ("PASS_MAX", None), ("MAX_TABLE_BYTES", None)):
+                    ("PASS_MAX", None), ("MAX_TABLE_BYTES", None),
+                    ("STEP_MS_MIN", None), ("DUR_S_MAX", None), ("DAY_MAX", None)):
         m = re.search(rf"const val {cn} = (\S+)", pass_kt)
         if m:
             ktdef[cn] = int(m.group(1).rstrip("L"), 0)
@@ -221,6 +236,26 @@ def main() -> int:
           {"固件 DPH_PASS_MAX": cdef.get("DPH_PASS_MAX"),
            "PC DPH_PASS_MAX": pydef.get("DPH_PASS_MAX"),
            "App PASS_MAX": ktdef.get("PASS_MAX")})
+    # 下面三条以前是"抓到了却没比"或者"根本没抓"。样点区起点这条有现成的账：
+    # App 在 1.5 版里是 0x3000，固件那轮改成 0x1000，差出来的 8 KiB 每次写表
+    # 都被填零盖出去 —— 三端比过这条，就不会等到新固件把它判成 BAD LAYOUT 才发现。
+    check("样点区起点（条目区的物理边界）",
+          {"固件 DPH_SAMPLE_OFF": cdef.get("DPH_SAMPLE_OFF"),
+           "PC DPH_SAMPLE_OFF": pydef.get("DPH_SAMPLE_OFF"),
+           "App SAMPLE_OFF": ktdef.get("SAMPLE_OFF")})
+    check("采样间隔下限 ms",
+          {"固件 DPH_STEP_MS_MIN": cdef.get("DPH_STEP_MS_MIN"),
+           "PC DPH_STEP_MS_MIN": pydef.get("DPH_STEP_MS_MIN"),
+           "App STEP_MS_MIN": ktdef.get("STEP_MS_MIN")})
+    check("单趟时长上限 s",
+          {"固件 DPH_DUR_S_MAX": cdef.get("DPH_DUR_S_MAX"),
+           "PC DPH_DUR_S_MAX": pydef.get("DPH_DUR_S_MAX"),
+           "App DUR_S_MAX": ktdef.get("DUR_S_MAX")})
+    # 固件不参与这条：4 bit 折回后的 +0 与合法的 +0 在 flash 里是同一串字节，
+    # 电台读不出差别，只有写表的一方拦得住（见 doppler.h 的 flags 注释）。
+    check("一张表覆盖到表头之后第几天",
+          {"PC DPH_DAY_MAX": pydef.get("DPH_DAY_MAX"),
+           "App DAY_MAX": ktdef.get("DAY_MAX")})
     # 擦除不能越进 Sonic 4K 互操作保留区：固件里是 _Static_assert，
     # 这里再算一遍，防的是"改了 C 的常量、忘了改 Python/Kotlin"这种半拉子。
     if sonic is None:
@@ -265,6 +300,49 @@ def main() -> int:
     if cdef.get("DPH_VERSION_MIN") and cdef.get("DPH_VERSION_MIN") != cdef.get("DPH_VERSION"):
         WARN.append(f"固件 DPH_VERSION_MIN={cdef['DPH_VERSION_MIN']} 与当前 {cdef['DPH_VERSION']} 不同："
                     f"旧版表仍可读，但 PC/App 只会写新版本，跨度内的兼容要人工确认")
+
+    # ── 3b. 表头标识：它是"这块地是不是我的"的唯一判据 ──
+    #   固件一个常量，PC 七个文件、App 两个文件各自抄了一遍字符串（共 20 多处）。
+    #   这一条以前没有任何一层比过 —— 和 SAMPLE_OFF 完全同一种"三端各写一份"，
+    #   只是它管的是擦除放行：认不出自己的表 → 该放行的拒擦；认错了别人的表 →
+    #   该拒的放行（语音包没了）。两种都只在按下"写表"之后才看得见。
+    def magic_of(txt: str) -> object:
+        s = set(re.findall(r'''["'](DPT\d)["']''', txt))
+        return None if not s else (next(iter(s)) if len(s) == 1 else " / ".join(sorted(s)))
+
+    check("表头标识 DPT1（擦除放行的判据）",
+          {"固件 DPH_MAGIC": cdef.get("DPH_MAGIC"),
+           "PC doppler_core.py": magic_of(core),
+           "PC doppler_tool.py": magic_of(tool),
+           "PC clear_table.py": magic_of(read(F_CLEAR)),
+           "App PassCalc.kt": magic_of(pass_kt),
+           "App DetailScreen.kt": magic_of(read(F_DETAIL_KT))})
+
+    # ── 3c. 校准记录在外部 flash 的哪一扇区：文档必须跟着常量走 ──
+    #   本轮 §三.3 修的那条错（文档写 0x171000，而它正落在表区 16 个扇区里）
+    #   没有任何一层能抓到 —— 照着地图去"清校准"的人会先把整张过境表擦掉。
+    #   判据：凡同时提到"校准"和一个外置 flash 地址（0x100000..0x1FFFFF）的行，
+    #   那个地址就必须是 DPH_CAL_ADDR；一份文档里一条都找不到也判红（说明说法变了，
+    #   这条检查瞎了）。0x200000 是 flash 末尾的区间上界，不算说法，排除在外。
+    for label, txt in (("多普勒使用说明", read(F_DOC)),
+                       ("外部flash空间地图", read(F_FLASH_MAP)),
+                       ("交付README", read(F_DELIV))):
+        said = []
+        for ln in txt.splitlines():
+            if "校准" not in ln:
+                continue
+            said += [int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{6})", ln)
+                     if 0x00100000 <= int(x, 16) < 0x00200000]
+        if not said:
+            BAD.append(f"{label} 里找不到任何一处带地址的校准说法 —— DPH_CAL_ADDR 这条"
+                       f"没有对照，检查本身失效了")
+        elif set(said) != {cdef.get("DPH_CAL_ADDR")}:
+            BAD.append(f"{label} 写的校准地址是 "
+                       + ", ".join(f"0x{v:06X}" for v in sorted(set(said)))
+                       + f"，而固件 DPH_CAL_ADDR = 0x{cdef.get('DPH_CAL_ADDR') or 0:06X}"
+                       + " —— 照着文档去擦的那个扇区不是校准记录所在")
+        else:
+            OK.append(f"{label} 的校准扇区说法 = 0x{cdef['DPH_CAL_ADDR']:06X}（与固件一致）")
 
     # ── 4. 0x076C 推帧：名字起始偏移 + 最短合法帧长 ──
     #   这两个数错一处就整帧被静默丢掉（App 里就写过这个坑：短名星算出来 24 字节，
@@ -442,10 +520,112 @@ def main() -> int:
                 f"固件排版表用到 page {over}，但排版器 PAGES 只登记了 {len(ed_pages)} 页"
                 f"（{', '.join(ed_pages)}）—— 在 layout_editor.html 里重新导出 doppler_layout.h"
                 f" 会把这些页整页丢掉。该改：PC 工具 layout_editor.html 的 PAGES 与 "
-                f"defaultModel()，补上对应页名与行（本次固件新增的是 page 6 = INFO）。")
+                f"defaultModel()，补上对应页名与行（本轮固件新增的是 page 7 = PRE-LISTEN "
+                f"与 page 8 = POST-LISTEN）。")
         else:
             OK.append(f"排版页口径：固件用 page {sorted(lay_pages)}，排版器登记 {len(ed_pages)} 页"
                       f"（{', '.join(ed_pages)}）")
+
+    # 排版器的 defaultModel 必须与固件那份**逐条相等**：一个是"人打开编辑器看到的
+    # 默认"，一个是"机器真正画的那张表"。上一轮加信息页时只动了固件，
+    # defaultModel 里 page 6 还是三行旧文案、RUN 页少了 $O Hz、READY 页还写着
+    # 死的 "M  START"（固件早就换成 $! 了）、空表页还是 "NO DATA"（换成 $@ 了）
+    # —— 谁点一次「恢复默认布局」再导出，那些修复就无声无息地被顶掉。
+    # 所以这条不只比页号，比到每一条的字体、坐标和文案。
+    m = re.search(r"function defaultModel\(\)\s*\{.*?return \[(.*?)\n  \];", ed, re.S)
+    fw_full = [(int(p), int(f), int(al), int(x), int(y), t) for p, f, al, x, y, t
+               in re.findall(r"\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,"
+                             r"\s*\"([^\"]*)\"\s*\}", lay)]
+    if not m:
+        BAD.append("layout_editor.html 解析不到 defaultModel() 的数组 —— 本检查需要更新")
+    elif not fw_full:
+        BAD.append("doppler_layout.h 解析不到完整条目 —— 本检查需要更新")
+    else:
+        F = {"tiny": 0, "small": 1, "bold": 2, "big": 3, "bar": 4}
+        A = {"left": 0, "centre": 1, "center": 1, "right": 2}
+        ed_full = []
+        for pg, rows in re.findall(r"/\*\s*(\d+).*?\*/\s*\[(.*?)\]", m.group(1), re.S):
+            for r in re.findall(r"\{text:\s*'(.*?)',\s*font:\s*'(\w+)',\s*x:\s*(\d+),"
+                                r"\s*y:\s*(\d+),\s*align:\s*'(\w+)'\}", rows):
+                ed_full.append((int(pg), F[r[1]], A[r[4]], int(r[2]), int(r[3]), r[0]))
+        if len(ed_full) * 2 < len(fw_full):
+            BAD.append(f"排版器 defaultModel 只解析到 {len(ed_full)} 条，固件有 {len(fw_full)} 条 "
+                       "—— 解析式失效，这条检查别看空气")
+        elif ed_full == fw_full:
+            OK.append(f"排版器 defaultModel 与固件排版表逐条一致（{len(fw_full)} 条 / "
+                      f"{len(lay_pages)} 页）—— 编辑器里导出不会偷偷改掉固件的版面")
+        else:
+            only_fw = [it for it in fw_full if it not in ed_full]
+            only_ed = [it for it in ed_full if it not in fw_full]
+            BAD.append(
+                "排版器 defaultModel 与固件 doppler_layout.h 不是同一张表："
+                f"固件多 {len(only_fw)} 条 / 编辑器多 {len(only_ed)} 条。"
+                " 固件侧：" + "; ".join(f"p{p} {t}@({x},{y})" for p, _f, _a, x, y, t in only_fw[:6])
+                + " 编辑器侧：" + "; ".join(f"p{p} {t}@({x},{y})"
+                                            for p, _f, _a, x, y, t in only_ed[:6])
+                + " —— 在 layout_editor.html 里把默认布局改成与固件一致（文案真值以导出为准）")
+
+    # ── 5b. 进度条项只能排在固件真会画它的页上 ──
+    #   DPH_Progress 只在几个相位里动手，其余相位第一句就 return —— 排在那些页上的
+    #   框永远是空的。而排版器的预览无条件画一条 60% 的假条（layout_editor.html 的
+    #   drawBar），于是"编辑器里看着有、电台上没有"。本轮新增的 page 7（预听）正挨着
+    #   RUN 页，是最容易被顺手拖进去一个条的一页。
+    #   允许的页号不写死：从固件现推（DPH_Progress 点名的相位 ×
+    #   UI_DisplayDoppler 里"该相位画第几页"的映射），两个解析任一失配就判红。
+    prog = (dop_c.split("static void DPH_Progress", 1)[1].split("\n}\n", 1)[0]
+            if "static void DPH_Progress" in dop_c else "")
+    bar_ph = sorted(set(re.findall(r"phase [!=]= (DPH_[A-Z]+)", prog)))
+    page_of = dict(re.findall(r"case (DPH_[A-Z]+):\s*DPH_DrawPage\((\d+)\)", dop_c))
+    bars = sorted({p for p, f, _a, _x, _y, _t in fw_full if f == 4})
+    ph_names = "、".join(p.replace("DPH_", "") for p in bar_ph)
+    if not bar_ph:
+        BAD.append("解析不到 DPH_Progress 里的相位清单（那个函数改了名或换了写法）"
+                   " —— 进度条页码这条看不见，判红")
+    elif not page_of:
+        BAD.append("解析不到 UI_DisplayDoppler 的 case → DPH_DrawPage 映射"
+                   " —— 同上，这条看不见，判红")
+    elif not bars:
+        WARN.append("版面里没有任何进度条项（font 4）—— 这条没有可对照的对象")
+    else:
+        ok_pages = sorted({int(page_of[p]) for p in bar_ph if p in page_of})
+        bad_pages = [p for p in bars if p not in ok_pages]
+        if bad_pages:
+            BAD.append(f"排版表把进度条放在 page {bad_pages}，而固件只在 page {ok_pages} 画它"
+                       f"（相位 {ph_names}） —— 编辑器预览会画一条 60% 的假条，"
+                       f"电台上是永远空着的框")
+        else:
+            OK.append(f"进度条项只在固件会画它的页上：page {bars} ⊆ {ok_pages}"
+                      f"（相位 {ph_names}）")
+
+    #   同一个函数的另外两个夹紧：`x0 > LCD_WIDTH-89` 挪到那个值、`y > FRAME_LINES*8-7`
+    #   同理。超出之后固件是**整条搬回来**，编辑器是**逐像素裁掉**（plot() 判界），
+    #   于是排得太靠右的条在预览里"右边出屏"、在电台上"整条左移"，两边都看不出
+    #   自己错在哪。夹紧的数不写死：两个被减数从 DPH_Progress 正文里抓，
+    #   LCD_WIDTH / FRAME_LINES 从 driver/st7565.h 抓，任一处抓不到就判红。
+    st7565 = read(F_ST7565)
+    lcd_w = re.search(r"#define\s+LCD_WIDTH\s+(\d+)", st7565)
+    fr_l = re.search(r"#define\s+FRAME_LINES\s+(\d+)", st7565)
+    bar_w = re.search(r"LCD_WIDTH\s*-\s*(\d+)u?", prog)
+    bar_h = re.search(r"FRAME_LINES\s*\*\s*8u?\s*-\s*(\d+)u?", prog)
+    BARS = [(p, x, y) for p, f, _a, x, y, _t in fw_full if f == 4]
+    if not bar_ph or not page_of:
+        BAD.append("进度条坐标这条没对照（上面的相位/页号解析失效）")
+    elif not (lcd_w and fr_l and bar_w and bar_h):
+        BAD.append("进度条夹紧解析不到：LCD_WIDTH=%s FRAME_LINES=%s 宽减数=%s 高减数=%s"
+                   " —— DPH_Progress 或 st7565.h 改了写法，这条看不见，判红"
+                   % (bool(lcd_w), bool(fr_l), bool(bar_w), bool(bar_h)))
+    else:
+        x_max = int(lcd_w.group(1)) - int(bar_w.group(1))
+        y_max = int(fr_l.group(1)) * 8 - int(bar_h.group(1))
+        off = [(p, x, y) for p, x, y in BARS if x > x_max or y > y_max]
+        if off:
+            BAD.append("进度条项超出固件不夹就画不下的范围："
+                       + "; ".join(f"page {p} 的 (x={x}, y={y})" for p, x, y in off)
+                       + f" —— 固件会把整条夹到 x≤{x_max} / y≤{y_max}，编辑器只是把出屏的"
+                         "像素裁掉，两边画出来的不是同一个位置")
+        else:
+            OK.append(f"进度条项坐标都在固件的夹紧范围内（{len(BARS)} 个，"
+                      f"x ≤ {x_max}、y ≤ {y_max}，两个数从固件现推）")
 
     if not fw_ph:
         BAD.append("doppler.c 里解析不到任何 `case 'x':` —— 占位符实现变了，本检查需要更新")

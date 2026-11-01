@@ -21,7 +21,8 @@ MASK = [0x16, 0x6C, 0x14, 0xE6, 0x2E, 0x91, 0x0D, 0x40,
 PORT = None          # None = 自动挑；--port COMx 可指定
 BAUD = 38400
 
-PHASE = {0: "OFF", 1: "READY", 2: "RUN", 3: "DONE", 4: "EMPTY", 5: "EXT(第二套逻辑)"}
+PHASE = {0: "OFF", 1: "READY", 2: "RUN", 3: "DONE", 4: "EMPTY", 5: "EXT(第二套逻辑)",
+         6: "PRE-LISTEN(预听)", 7: "POST-LISTEN(尾音)"}
 
 # 表区起点（和 doppler_core.TABLE_START 一致）。本脚本故意不 import
 # doppler_core，避免把 numpy/sgp4 拖进来，所以这里单独写一份。
@@ -119,7 +120,8 @@ def show_fw_tag(ser) -> bool:
     print(f"   ver      = {info['ver'] or '(空)'}")
     print(f"   ppm      = {info['ppm']:+d}   （固件钳位后真正写进 REG_3B 的值）")
     print(f"   ppm_max  = {info['ppm_max']}   （存储侧与施加侧共用的上限）")
-    print(f"   proto    = {info['proto']}   （6 = 带第二套逻辑页）")
+    print(f"   proto    = {info['proto']}   （7 = 0x0775 回亚音自己的 State；"
+          f"6 = 带第二套逻辑页的老口径；App 按 ≥6 判有第二套逻辑）")
     print(f"   phase    = {info['phase']} ({PHASE.get(info['phase'], '?')})")
     print(f"   clamped  = {info['clamped']}")
     if info["clamped"]:

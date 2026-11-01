@@ -129,7 +129,8 @@ def parse_fw_tag(resp) -> dict:
       ppm      真正写进 BK4819 REG_3B 的偏移量（已按 PpmMax 钳过）
       ppm_max  DPH_PPM_MAX，即"存储侧与施加侧共用的那个上限"（当前 76）
       proto    0x076A 回包里那个 proto（6 = 带第二套逻辑页）
-      phase    0..5，口径与 0x076A 的第三字节、信息页 $? 完全一致
+      phase    0..7，口径与 0x076A 的第三字节、信息页 $? 完全一致
+               （6=预听 PRE-LISTEN，7=尾音 POST-LISTEN，只能往后追加）
       clamped  abs(ppm) == ppm_max。**这只是"到轨"的判断，不是悔改记录**：
                用户填的 76 与填了 200 被钳成 76，在这里长得一模一样，所以
                真正的结论要拿用户输入去比（0x0772 只回生效值，不回原始值）。

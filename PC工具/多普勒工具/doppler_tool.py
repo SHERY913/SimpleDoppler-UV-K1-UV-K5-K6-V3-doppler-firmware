@@ -111,7 +111,9 @@ def msg_of(cmd, payload=b""):
 MIN_PROTO = 6
 
 # 0x0776 的解锁令牌，必须与固件 doppler.h 的 DPH_UNLOCK_TOKEN 一模一样
-# （"DPU1" 的小端整数）。verify_three_way.py 会同时读两边比一次。
+# （"DPU1" 的小端整数）。比这一条的是第 8 层 verify_table_fit.py（它读 doppler.h
+# 取常量再比这里）；第 2 层 verify_link_ask.py 再拿假电台实测一次能不能借到额度。
+# 以前这里写的 verify_three_way.py 一个字都没比过令牌 —— 注释替不存在的检查背书。
 UNLOCK_TOKEN = 0x31555044
 
 
@@ -1622,7 +1624,12 @@ class Tool(tk.Tk):
             sectors = core.erase_plan(len(table))
             for a in sectors:
                 core.guard(a, core.DPH_SECTOR)
-            for i in range(len(table) // core.DPH_SECTOR + 1):
+            # 向上取整，不是"商加一"：表长 = 0x1000 + 6×总样点数，所以它真的
+            # 可能正好是 4 KiB 的整数倍（总样点 10240 → 整 64 KiB，而 fit_keep
+            # 用的是"超过才丢"，等号放行）。原来那句 //4096+1 在这种表上多数出
+            # 一个扇区，guard(0x172000) 判越界，满容表被自己的地址自检拒写，
+            # 弹出来的还是"地址自检没通过，一个字节都没写"这种看不出原因的话。
+            for i in range((len(table) + core.DPH_SECTOR - 1) // core.DPH_SECTOR):
                 core.guard(core.TABLE_START + i * core.DPH_SECTOR, core.DPH_SECTOR)
         except Exception as e:
             messagebox.showerror("表格", f"地址自检没通过，一个字节都没写：{e}")

@@ -48,7 +48,7 @@ SONIC_RESERVE_BASE = 0x1DE000  # mb_flash.h：这以上归 Sonic 4K 互操作保
 #
 # 现在"这张表装不装得下"按**真实字节**算：table_used() 给出实际占用，
 # fit_keep() 给出从末尾往前最多留几趟；装不下时 GUI 让操作员去掉几趟。
-# 与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX 同一个数，verify_three_way.py 当场比。
+# 与固件 DPH_PASS_MAX、App PassCalc.PASS_MAX 同一个数，verify_layout.py 当场比。
 DPH_PASS_MAX = 102
 # 样点栅格。固件侧 DPH_OffsetAt() 本来就是线性插值，所以把 1 s 改成 10 s
 # 只是少存点、不改算法：437.8 MHz 多普勒二阶导峰值约 0.5 Hz/s²，
@@ -59,6 +59,13 @@ DPH_PASS_MAX = 102
 DPH_STEP_MS_MIN = 5000         # 固件 DPH_LoadEntry 拒收比这更密的表
 DPH_STEP_S_DEFAULT = 10.0
 DPH_DUR_S_MAX = 1500           # 固件容量断言里的那个上限，两边必须一致
+# 一张表最多覆盖几个"本地日"。条目里那个日偏移是 flags 的低 4 bit
+# （固件 dph_entry_t.flags 的 [3:0]），所以只能表达 0..15 —— 第 16 天会被
+# 静默折回 +0：屏幕上日期少 16 天、到 AOS 的倒计时按折回后的日子算、
+# "定时开始"直接判"时钟丢了"而不自杀。表本身不会写坏 flash，所以固件读不出
+# 来（折回后的 +0 和合法的 +0 是一模一样的字节），只能由写表的一方拦住。
+# 与 App 的 PassCalc.DAY_MAX 同一个数，verify_table_fit.py 当场比。
+DPH_DAY_MAX = 15
 
 # 擦除范围是从 DPH_REGION 推导的（erase_plan 的上限就是表区扇区数），
 # 所以表区声明越界 = 真的会去擦保留区，而扇区擦除不可恢复。
@@ -746,6 +753,25 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
             raise ValueError(
                 f"{getattr(p, 'name', name)} 的过境时长 {p.duration} s 超过 "
                 f"{DPH_DUR_S_MAX} s；检查 TLE 与地面站坐标")
+
+        # 本地日偏移只有 4 bit（见 DPH_DAY_MAX）。这里以前直接 `& 0x0F`，
+        # 第 16 天那趟被折成"今天"写进表里，构表和校验双双放行。
+        day_idx = ((p.aos + timedelta(hours=tz_hours)).date() - base.date()).days
+        if day_idx < 0:
+            raise ValueError(
+                f"第 {len(entries) + 1} 趟（{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M} "
+                f"本地）比表头那一天（{base:%m-%d}）还早。条目只能表达"
+                f"表头之后的第几天，倒着排电台会读出完全错误的日期。"
+                f"过境必须按时间从早到晚排。")
+        if day_idx > DPH_DAY_MAX:
+            raise ValueError(
+                f"第 {len(entries) + 1} 趟（{getattr(p, 'name', name)}，"
+                f"{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M} 本地）已经在"
+                f"表头那一天之后 {day_idx} 天了，而条目里的"
+                f"日期偏移只有 4 bit，最多表达 {DPH_DAY_MAX} 天 —— 再往后会被折回"
+                f"成第 0 天，电台上显示的日期和倒计时都是错的。"
+                f"把天数收窄，或者先写掉前面这批再写后面那批。")
+
         entries.append(struct.pack(
             "<16sIIIHHHHHBB",
             _pad16(getattr(p, "name", name)),
@@ -761,7 +787,7 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
             # day offset must follow the local calendar, not a 24-hour bucket
             # from the first pass: a pass at 02:18 local can sit in the same UTC
             # day as one at 20:41 and would otherwise show the wrong date
-            ((p.aos + timedelta(hours=tz_hours)).date() - base.date()).days & 0x0F,
+            day_idx,
             int(round(p.max_el)),
         ))
 
