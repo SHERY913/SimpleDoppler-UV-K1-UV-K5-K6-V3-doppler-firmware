@@ -6,11 +6,15 @@ PC 算过境、把「频率随时间怎么变」的表写进电台外部 flash�
 
 ## 目录
 
+> **接手先读** `文档/历史/项目交接-31.md` **第九节**：三端定位、全部工具清单、
+> 安卓 APP 现状与下一步（下一轮主线是重打 APK）。本节只讲目录与命令。
+
 ```
 固件源码/uvk1-v6.3.0/   C 固件（独立 git 仓）。入口 App/app/doppler.c（5486 行）、
                         doppler.h、doppler_layout.h（9 个页面的坐标表，脚本生成）；
                         路由在 App/app/app.c 搜 DISPLAY_DOPPLER；串口协议 App/app/uart.c
-安卓App/android-app/    Kotlin App（独立 git 仓）。样点区常量仍是 0x3000 → 写表判 BAD LAYOUT
+安卓App/android-app/    Kotlin App（独立 git 仓）。源码已对齐 SAMPLE_OFF=0x1000；
+                        会判 BAD LAYOUT 的是 `交付/` 里那个 1.5 的旧 APK 二进制，不是源码
 PC工具/多普勒工具/      doppler_tool.py + radio_proto.py + verify_*.py 回归网（48 文件平铺，别通读）
 交付/                   当前 bin/apk（不带日期）+ 历史-YYYYMMDD/（回滚用）
 tests/sim/              PC 上的"假电台"：把 doppler.c 原样编到宿主，桩掉孔芯片，
@@ -102,7 +106,8 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
    **这十条一条都没上过真机。**
 4. 重 dump 三份外部 flash 镜像到 `verify/fixtures/`（原在 `多普勒/临时/`，已随清理删除），
    否则 8/9 那三条真实对照一直跳空。**别再放 `临时/`，那是清理目标。**
-5. 重打 APK：把 `DPH_SAMPLE_OFF` 对齐 0x1000，手机写表才通。
+5. **重打 APK**（下一轮主线，细节见交接-31 §九）：源码已是 `SAMPLE_OFF = 0x1000`，
+   只需 `tc/gradle-8.7/bin/gradle assembleDebug` + 提 versionCode/versionName，装 MuMu 验。
 6. `文档/历史/项目交接-25.md` §七 的 12 步上机清单，一条都没验过。
 7. 已知未修：手机交还后停在 AOS 偏移（`DOPPLER_SetExtControl` 末尾）；`DPH_TuneSafe`
    只看 `gCurrentFunction` 有 PTT 时间窗；`sub != 0` 时武装倒计时被挂起（AOS 过去会静默丢武装）；
