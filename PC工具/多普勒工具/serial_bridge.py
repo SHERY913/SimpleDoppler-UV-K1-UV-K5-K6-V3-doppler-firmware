@@ -115,7 +115,15 @@ class Port:
         # 有多少读多少：pyserial 的 read(n) 会等凑够 n 字节，一个 13 字节回包
         # 要干等满 timeout 才转发，一问一答的协议会被拖成 50 ms/帧。
         n = s.in_waiting
-        return s.read(n if n else 1)
+        try:
+            return s.read(n if n else 1)
+        except TypeError:
+            # pyserial 在 Windows 上的经典死法：端口句柄被关掉的瞬间正好有一个
+            # overlapped read 挂着，`_overlapped_read` 变成 None，之后每次 read
+            # 都抛 TypeError('byref() argument must be a ctypes instance')。
+            # 这不是"读失败"，是"这个 Port 对象已经废了"——必须重开，否则
+            # 读线程当场死掉，App 那边表现为"接管的界面卡在握手"。
+            raise OSError("overlapped read 句柄已失效")
 
     def write(self, data: bytes) -> None:
         with self.lock:
@@ -126,8 +134,19 @@ class Port:
             s.flush()
 
 
-def pump_from_port(port: Port, conn: socket.socket, stop: threading.Event, log: bool) -> None:
-    while not stop.is_set():
+def reader_loop(port: Port, state: dict, log: bool) -> None:
+    """**全局唯一的串口读线程**。
+
+    为什么必须是唯一的：串口是独占资源，两个线程同时 `read()` 会把一帧字节
+    劈成两半，各拿一段 —— 一帧 13 字节里少掉一个 `ab`，App 侧就报
+    「回包头不对：cd 07 00 7d」。以前每个 client 一个读线程，而"踢旧 client"
+    只是 `stop.set()`，旧线程还卡在 read 里没退，新 client 的读线程就已经开跑了，
+    于是字节被两边分食。
+
+    现在的结构：读线程只写"当前 client"这一个 socket，client 换了就换目标，
+    端口永远只有这一个读者。
+    """
+    while True:
         try:
             data = port.read_some()
         except (serial.SerialTimeoutException,):
@@ -135,19 +154,25 @@ def pump_from_port(port: Port, conn: socket.socket, stop: threading.Event, log: 
         except OSError as e:
             port.dead(str(e))
             if not port.ensure(300):
-                print("[bridge] 串口没能回来，断开这个 client", flush=True)
-                stop.set()
-                return
+                print("[bridge] 串口没能回来，等下一个 client", flush=True)
+            continue
+        except Exception as e:  # 读线程绝不能死：一死 App 就永远卡在握手
+            port.dead("读线程异常 %s: %s" % (type(e).__name__, e))
+            if not port.ensure(300):
+                print("[bridge] 串口没能回来，等下一个 client", flush=True)
             continue
         if not data:
             continue
+        with state["lock"]:
+            conn = state["conn"]
+        if conn is None:
+            continue   # 没有 client 在听：字节直接丢（等价于 flushInput）
         if log:
             print("radio->app %d %s" % (len(data), data.hex(" ")), flush=True)
         try:
             conn.sendall(data)
         except OSError:
-            stop.set()
-            return
+            pass       # 这个 client 已经死了，下一轮会换目标
 
 
 def pump_from_tcp(port: Port, conn: socket.socket, stop: threading.Event, log: bool) -> None:
@@ -252,12 +277,56 @@ def serve(args):
         print("端口 %s:%d 已被占用（%s）。先关掉占它的程序：多普勒工具、另一个桥接窗口、"
               "串口助手、或残留的测试脚本。" % (args.listen_host, args.listen, e), flush=True)
         raise SystemExit(2)
-    srv.listen(1)
+    # backlog 给 8：App 断链重连时新旧 socket 会短暂共存，backlog=1 会让新连接
+    # 直接被拒（WinError 10061），App 侧表现为"重连要等好几秒"。
+    srv.listen(8)
     print("bridge listening on %s:%d -> %s @ %d" % (
         args.listen_host, args.listen, args.port, args.baud), flush=True)
 
+    # **端口全程只开一次**。以前是"每来一个 client 就 Port(...) 开一次、
+    # 断开就 close()"，那是 App 侧"接管的界面永远卡在握手"的根因：
+    # 关闭句柄时正好挂着一个 overlapped read，pyserial 的 _overlapped_read
+    # 变 None，下个 client 里所有 read 立刻抛 TypeError，读线程死掉，
+    # 于是"能发不能收"——App 侧只看到 0/4 字节。
+    port = Port(args.port, args.baud)
+    if port.ser is None:
+        print("[bridge] 串口打不开，退出", flush=True)
+        raise SystemExit(2)
+
+    current = {"conn": None, "stop": None, "addr": None, "lock": threading.Lock()}
+
+    # 全局唯一读线程，先起好，后面只换它写往哪个 socket。
+    threading.Thread(target=reader_loop, args=(port, current, args.log), daemon=True).start()
+
+    def kick_current(why: str) -> None:
+        """新 client 来了就把旧的踢掉。
+
+        为什么踢而不是拒绝新的：App 侧断链重连时会先建新连接、旧 socket 还挂在
+        FIN_WAIT；`listen(1)` 加串行服务会让新连接直接被拒（WinError 10061），
+        App 只看到"连接被拒绝"，然后退避重试 —— 表现出来就是"重连要等好几秒"。
+        电台只有一个 UART，两个 client 同时写必然把帧搅在一起，所以只能留一个。
+        """
+        with current["lock"]:
+            c, s, a = current["conn"], current["stop"], current["addr"]
+            current["conn"] = None
+            current["stop"] = None
+        if c is None:
+            return
+        print("[bridge] 踢掉旧 client %s（%s）" % (a, why), flush=True)
+        if s is not None:
+            s.set()
+        try:
+            c.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            c.close()
+        except Exception:
+            pass
+
     while True:
         conn, addr = srv.accept()
+        kick_current("新连接 %s" % (addr,))
         conn.settimeout(0.05)
         # Nagle 会把"小包 + 等对端 ACK"叠成 40 ms 级延迟，一问一答的协议最吃亏。
         try:
@@ -266,29 +335,29 @@ def serve(args):
             pass
         print("client %s" % (addr,), flush=True)
 
-        port = Port(args.port, args.baud)
-        if port.ser is None:
+        if not port.ensure(300):
             conn.close()
             continue
 
         stop = threading.Event()
-        t1 = threading.Thread(target=pump_from_tcp,
-                              args=(port, conn, stop, args.log), daemon=True)
-        t2 = threading.Thread(target=pump_from_port,
-                              args=(port, conn, stop, args.log), daemon=True)
-        t1.start()
-        t2.start()
-        t1.join()
-        stop.set()
-        try:
-            port.ser.close()
-        except Exception:
-            pass
-        try:
-            conn.close()
-        except Exception:
-            pass
-        print("client gone（串口掉线 %d 次）" % port.drops, flush=True)
+        with current["lock"]:
+            current["conn"], current["stop"], current["addr"] = conn, stop, addr
+
+        def run_client(conn=conn, stop=stop, addr=addr):
+            # 只管"phone → 电台"这一个方向；反方向由全局读线程负责。
+            pump_from_tcp(port, conn, stop, args.log)
+            stop.set()
+            with current["lock"]:
+                if current["conn"] is conn:
+                    current["conn"] = None
+            # 只关 socket，端口留着给下一个 client —— 重开一次就有一个"首帧丢失"窗口。
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print("client gone %s（串口掉线 %d 次）" % (addr, port.drops), flush=True)
+
+        threading.Thread(target=run_client, daemon=True).start()
 
 
 def resolve_port(name):
