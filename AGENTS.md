@@ -6,18 +6,18 @@ PC 算过境、把「频率随时间怎么变」的表写进电台外部 flash�
 
 ## 目录
 
-> **接手先读** `文档/项目交接-32.md` **第九节**（安卓端全部现状 + 给下一个 AI 的硬规矩），
-> 固件侧读 `文档/项目交接-31.md`。本节只讲目录与命令。
+> **接手先读** `文档/项目交接-37.md`（唯一交接文件：固件 + 安卓全貌、罗盘规格、给下一个 AI 的硬规矩）。
+> 31~36 已在 2026-11-07 的整理中删除，结论全部并进 37。本节只讲目录与命令。
 
 ```
 固件源码/uvk1-v6.3.0/   C 固件。入口 App/app/doppler.c、doppler.h、
                         doppler_layout.h（9 个页面的坐标表，脚本生成）；
                         路由在 App/app/app.c 搜 DISPLAY_DOPPLER；串口协议 App/app/uart.c
 PC工具/多普勒工具/      doppler_tool.py + radio_proto.py + verify_*.py 回归网（48 文件平铺，别通读）
-交付/                   只有 f4hwn.sstv.doppler.bin 和 README.md（旧 APK 与历史快照已清）
+交付/                   f4hwn.sstv.doppler.bin（当前固件）+ F4HWN-Doppler.apk（2.0.0-m5）+ README.md
 tests/sim/              PC 上的"假电台"：把 doppler.c 原样编到宿主，桩掉孔芯片，
                         断言频合/功率/相位事件流。固件源码零改动，见它的 README
-文档/                   6 份：交接-31（固件侧）、交接-32（安卓端）、
+文档/                   6 份：交接-37（唯一交接文件）、真机安装-安卓、
                         Look4Sat 参考 ×2、flash 空间地图 ×2。别再往里堆审计报告
 数据/sat_freq.json      频点唯一真源
 ```
@@ -53,7 +53,7 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
 > 下面提到的 `交接-26`…`交接-30` **已在 2026-11-04 的整理中删除**（只留 31、32）。
 > 那些文件的结论都摘要在下文各条里；要查原文只能翻 git 历史。
 
-- 交付固件 `交付/f4hwn.sstv.doppler.bin` = 106,648 B / `a529bf72…`（`Nov  2 2026` / `01:10:13`）；
+- 交付固件 `交付/f4hwn.sstv.doppler.bin` = 106,660 B / `b5d6e613…`（`Nov  5 2026` / `00:07:42`）；
   表格式 v5、proto 7，**旧表通用，重刷不必重写表**。历史快照已随整理删除，要旧版就按源码重编。
 - 交接-26 修了三条（读代码读出，详见 项目交接-26）：
   ① `DPH_TxApply` 没同步 `last_freq` → 预听/尾音页松手后接收机停在上行频点（`:904` 补一行）
@@ -102,7 +102,7 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
 
 1. ~~交接-30 的四条改动编译~~ **已完成（交接-31）**：已过编译器、已补断言与 `negctl 12..15`、
    已换 `交付/` 与桌面、README 指纹行已同步。剩下的只有上机验。
-2. **上机验 E6~E9 与 D5**（验法见交接-30 §八第 4 条）。D1~D4 已通过，D5 至今无人验。
+2. **上机验 E6~E9 与 D5**（验法：每条 1 分钟照表点）。D1~D4 已通过，D5 至今无人验。
 3. **上机验 E1~E5 + D1~D5 一共十条**（每条 1 分钟；E 那五条怎么验写在
    项目交接-29 §二~五各段末尾，D 那五条见 `-26.md` §二~四、`-27.md` §二~三）。
    **这十条一条都没上过真机。**
@@ -110,7 +110,7 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
    否则 8/9 那三条真实对照一直跳空。**别再放 `临时/`，那是清理目标。**
 5. ~~重打 APK~~ **已作废**：旧仓 `多普勒/安卓App/` 已于 2026-11-04 删除，
    安卓端改在 `<workspace>/doppler-ng/` 从零重写（包名 `com.f4hwn.doppler2`），
-   见 `项目交接-32.md`。M1~M4 已真机验收，剩 M5 跟踪页、M6 发版。
+   见 `项目交接-37.md` §五。M1~M5 已验收（含罗盘重写与锁竖屏），剩 M6 发版。
 6. 项目交接-25 §七 的 12 步上机清单，一条都没验过。
 7. 已知未修：手机交还后停在 AOS 偏移（`DOPPLER_SetExtControl` 末尾）；`DPH_TuneSafe`
    只看 `gCurrentFunction` 有 PTT 时间窗；`sub != 0` 时武装倒计时被挂起（AOS 过去会静默丢武装）；
