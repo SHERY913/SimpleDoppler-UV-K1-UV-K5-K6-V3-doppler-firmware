@@ -1,6 +1,7 @@
-# 固件与安卓各自是独立仓库，不在这个仓库里当 gitlink
+# 固件与安卓都在本仓之外：
+#   固件源码/ 是另一个仓库；安卓 App 在 <workspace>/doppler-ng/（不在本仓、
+#   也不能搬进来 —— Gradle test worker 在非 ASCII 路径下整包 ClassNotFound）
 固件源码/
-安卓App/
 
 # 本机临时目录
 _tmp_gfw/
