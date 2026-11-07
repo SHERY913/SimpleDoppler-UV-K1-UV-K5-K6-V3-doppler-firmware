@@ -1,0 +1,15 @@
+// 故意写坏的一份：版本 99、未知类型、visible 带花括号、点击区太小。
+// 用来验校验器能不能把三条错误都指到具体节点上（验收 5）。
+{
+  "version": 99,
+  "screens": {
+    "broken": {
+      "nodes": [
+        { "type": "text", "id": "ok", "x": 12, "y": 12, "w": 200, "h": 20, "text": "这行没问题" },
+        { "type": "blink", "id": "unknownType", "x": 12, "y": 40, "w": 120, "h": 40 },
+        { "type": "button", "id": "badVisible", "x": 12, "y": 90, "w": 120, "h": 40, "visible": "{sat.rxOk}", "onClick": "nav.track" },
+        { "type": "button", "id": "tinyTap", "x": 140, "y": 90, "w": 30, "h": 20, "onClick": "nav.back" }
+      ]
+    }
+  }
+}
