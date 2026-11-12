@@ -5,7 +5,9 @@ a = Analysis(
     ['../../PC工具/多普勒工具/doppler_tool.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/sat_pics', 'sat_pics')],
+    datas=[('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/sat_pics', 'sat_pics'),
+           ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/app.ico', '.'),
+           ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/ico', 'ico')],
     hiddenimports=['sgp4.api', 'serial', 'serial.tools.list_ports'],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +37,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/app.ico',
 )

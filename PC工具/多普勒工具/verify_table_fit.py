@@ -29,6 +29,7 @@ verify_layout.py 比的是"三端数字一样"，这里比的是"这个数字真
 退出码：0 全过；1 有硬错误。
 """
 import datetime as dt
+import glob
 import json
 import os
 import re
@@ -68,6 +69,8 @@ def load_sat(norad=25544):
 
 
 fails = []
+unverified = []          # 真镜像对照里"本地没有这个文件"的项
+verified_real = []       # 真镜像对照里真跑过的文件
 
 
 def ok(msg):
@@ -394,23 +397,51 @@ def check_ownership():
     if r:
         print(f"      → 给出的拒绝理由：{r}")
 
-    # 真镜像：把三片实测镜像里表区那 32 KiB 原样喂给闸门。
-    # 这是整套检查里最"实战"的一条：不是合成数据，是真的别人的字节。
-    real = os.path.join(HERE, "..", "..", "临时")
-    for fname, expect_pass, what in (
-            ("全满.bin", False, "原厂镜像（表区是语音包尾巴）"),
-            ("无多系统.bin", False, "原厂单系统镜像（同上）"),
-            ("汉化-02-external-flash.bin", True, "白头佬汉化镜像（表区真的空着）")):
-        path = os.path.join(real, fname)
-        if not os.path.exists(path):
-            print(f"  · 跳过 {what}：本地没有 {fname}")
-            continue
+    # 真镜像：把镜像里表区那 64 KiB 原样喂给闸门。
+    # 这是整套检查里最"实战"的一条：不是合成数据，是真的字节。
+    #
+    # 两种来源：
+    #   ① 原厂 / 汉化整片镜像（全满.bin、无多系统.bin、汉化-02-external-flash.bin）
+    #      —— 串口 dump 产不出来，只能从外部拿到；本地没有就记"未验证"，
+    #      不许再像 2026-11-08 之前那样 print 一句"跳过"就算过（假绿）。
+    #   ② 自己手台的 dump（dump_region.py 产出的 handset-table-*.bin，裸 64 KiB）
+    #      —— 表头是 DPT1，属于"我们自己的表"，闸门必须放行；这条本机就能复跑。
+    # 加载器两种格式都吃：文件比 DPH_BASE 短 → 整个文件就是表区；否则按整片镜像
+    # 定位到 DPH_BASE。
+    fixtures = os.path.join(ROOT, "verify", "fixtures")
+    legacy = os.path.join(ROOT, "临时")
+
+    def load_region(path):
         with open(path, "rb") as f:
-            f.seek(core.DPH_BASE)
-            blob = f.read(core.DPH_REGION)
-        if len(blob) != core.DPH_REGION:
-            bad(f"{fname} 读表区不足 {core.DPH_REGION} B")
+            data = f.read(core.DPH_BASE + core.DPH_REGION)
+        if len(data) < core.DPH_BASE + core.DPH_REGION:
+            return data if len(data) == core.DPH_REGION else None
+        return data[core.DPH_BASE:core.DPH_BASE + core.DPH_REGION]
+
+    cases = [
+        ("全满.bin", False, "原厂镜像（表区是语音包尾巴）"),
+        ("无多系统.bin", False, "原厂单系统镜像（同上）"),
+        ("汉化-02-external-flash.bin", True, "白头佬汉化镜像（表区真的空着）"),
+    ]
+    for p in sorted(glob.glob(os.path.join(fixtures, "handset-table-*.bin"))):
+        cases.append((os.path.basename(p), True, ""))
+
+    for fname, expect_pass, what in cases:
+        if fname.startswith("handset-table-"):
+            path = os.path.join(fixtures, fname)
+            what = "手台自 dump 表区 %s" % fname
+        else:
+            path = next((q for q in (os.path.join(fixtures, fname),
+                                     os.path.join(legacy, fname))
+                         if os.path.exists(q)), os.path.join(fixtures, fname))
+        if not os.path.exists(path):
+            unverified.append("%s（%s 未验证：本地没有这个文件）" % (what, fname))
             continue
+        blob = load_region(path)
+        if blob is None:
+            bad(f"{fname} 既不是 64 KiB 裸表区，也不够一整个镜像")
+            continue
+        verified_real.append(fname)
         cl = core.classify_region(blob)
         r = core.occupied_reason(cl)
         if expect_pass:
@@ -421,6 +452,11 @@ def check_ownership():
                 f"{what} → 拒绝擦除" if r else f"{what} 竟然放行了！会被擦掉 {core.DPH_REGION} B 真数据")
             if r:
                 print(f"      → {r}")
+
+    print(f"  · 真镜像对照：跑过 {len(verified_real)} 条"
+          f"（{'、'.join(verified_real) or '无'}），未验证 {len(unverified)} 条")
+    for u in unverified:
+        print(f"  · 未验证：{u}")
 
     # guard() 的**两半**都要测：拦得住禁区，也要放得行表区。
     # 上一版只有前一半，于是"表区落在自己声明的禁区里"这种致命错误全绿通过。
@@ -598,6 +634,7 @@ def check_firmware():
 
 
 def main():
+    strict = "--strict" in sys.argv[1:]
     print("多普勒表区：容量 / 精度 / 归属（离线，不需要电台）")
     print(f"表区 0x{core.DPH_BASE:06X}..0x{core.DPH_BASE + core.DPH_REGION:06X}，"
           f"{core.DPH_REGION // 1024} KiB，{core.DPH_PASS_MAX} 条，"
@@ -612,7 +649,10 @@ def main():
     if fails:
         print(f"有 {len(fails)} 项硬错误，见上")
         return 1
-    print("全部通过")
+    if strict and unverified:
+        print(f"有 {len(unverified)} 条真镜像对照没跑（--strict）")
+        return 1
+    print("全部通过" + (f"（{len(unverified)} 条真镜像对照未验证）" if unverified else ""))
     return 0
 
 

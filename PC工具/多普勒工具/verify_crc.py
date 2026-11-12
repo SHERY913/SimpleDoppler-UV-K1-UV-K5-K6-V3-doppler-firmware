@@ -30,7 +30,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 FW_UART = ROOT / "固件源码" / "uvk1-v6.3.0" / "App" / "app" / "uart.c"
 FW_CRC_C = ROOT / "固件源码" / "uvk1-v6.3.0" / "App" / "driver" / "crc.c"
-KT_LINK = ROOT / "安卓App" / "android-app" / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler" / "RadioLink.kt"
+# App 已整体搬到 <workspace>/doppler-ng/（包名 com.f4hwn.doppler2），
+# 旧路径 多普勒/安卓App/ 从来没进过库。CRC 现在住在 protocol/RadioProto.kt。
+WS = ROOT.parent
+KT_LINK = WS / "doppler-ng" / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler2" / "protocol" / "RadioProto.kt"
 
 sys.path.insert(0, str(HERE))
 import radio_proto as rp        # noqa: E402  三端里的那一端（PC）
@@ -112,18 +115,22 @@ def check_params() -> None:
         ok("crc.c：init 0 / poly 0x1021 / MSB-first")
 
     if "0x1021" not in kt:
-        BAD.append("RadioLink.kt：找不到多项式 0x1021")
+        BAD.append("RadioProto.kt：找不到多项式 0x1021")
     else:
-        ok("RadioLink.kt：poly 0x1021")
+        ok("RadioProto.kt：poly 0x1021")
 
     # App 侧那个 0xFFFF 跳过是**故意**留的兼容口，但它必须还在，
     # 否则接老固件（恒 0xFFFF）会整条链路拒收。
     # 只 grep "0xFFFF" 不算数 —— 文件里别处也有这个字面量，必须比到那句判断本身。
-    if not re.search(r"crcRx\s*!=\s*0xFFFF", kt):
-        BAD.append("RadioLink.kt：`crcRx != 0xFFFF` 那个兼容口不见了/被改条件了 —— "
+    # 兼容口有两种等价写法，都必须认：
+    #   旧 RadioLink.kt：`if (crcRx != 0xFFFF) { 校验 }`  —— 不等于 0xFFFF 才校验
+    #   新 RadioProto.kt：`crcRx == 0xFFFF || crcRx == crc16(...)` —— 等于 0xFFFF 直接放行
+    # 两者语义都是「恒 0xFFFF 的老固件回包照样收」。只认一种会把搬过家的 App 判成漂移。
+    if not re.search(r"crcRx\s*(?:!=|==)\s*0xFFFF", kt):
+        BAD.append("RadioProto.kt：0xFFFF 兼容口不见了/被改条件了 —— "
                    "接老固件（回包恒 0xFFFF）会一帧都收不下")
     else:
-        ok("RadioLink.kt：保留 0xFFFF 兼容口（老固件仍可用）")
+        ok("RadioProto.kt：保留 0xFFFF 兼容口（老固件仍可用）")
 
 
 # ---------------------------------------------------------------- 行为闭环

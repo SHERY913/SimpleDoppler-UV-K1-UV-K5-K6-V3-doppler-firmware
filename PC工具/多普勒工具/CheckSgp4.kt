@@ -1,5 +1,5 @@
-import com.f4hwn.doppler.orbit.Sgp4
-import com.f4hwn.doppler.orbit.Tle
+import com.f4hwn.doppler2.orbit.Sgp4
+import com.f4hwn.doppler2.orbit.Tle
 import java.io.File
 import kotlin.math.sqrt
 

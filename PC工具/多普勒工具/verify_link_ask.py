@@ -292,13 +292,13 @@ def main():
     link.erase(core_start())
     link.write(core_start(), tbl)
     check("整表一致时返回 None",
-          dt.Tool._verify_table(object(), _link_at(fake), tbl, lambda t: None) is None)
+          dt.verify_table(_link_at(fake), tbl, lambda t: None) is None)
 
     # 复现真机事故：每一页写完回读都是对的，事后整段变成 0xFF（WIP 竞争）。
     # 所以这里不改写入路径，而是在写完**之后**把那个字节改成 0xFF —— 逐页
     # 回读（Link.write 内部）看不出问题，只有整表回读能抓住。
     fake.flash[core_start() + 137] = 0xFF
-    bad = dt.Tool._verify_table(object(), _link_at(fake), tbl, lambda t: None)
+    bad = dt.verify_table(_link_at(fake), tbl, lambda t: None)
     check("丢字的偏移被定位", bad is not None and bad[0] == 137, str(bad))
     check("报出的是设备里真实的字节", bad is not None and bad[1] == 0xFF, str(bad))
 
@@ -306,7 +306,7 @@ def main():
     link.erase(core_start())
     link.write(core_start(), tbl)
     check("整表重写一次后一致",
-          dt.Tool._verify_table(object(), _link_at(fake), tbl, lambda t: None) is None)
+          dt.verify_table(_link_at(fake), tbl, lambda t: None) is None)
 
     print("== expect 语义固定为 body 长度 ==")
     # 删掉一条永绿断言：原来这里是

@@ -30,10 +30,16 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WS = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-FW = os.path.join(WS, "多普勒", "固件源码", "uvk1-v6.3.0", "App", "app")
+FW_CANDIDATES = [
+    os.path.join(WS, "多普勒", "固件源码", "uvk1-v6.3.0", "App", "app"),
+    os.path.join(WS, "_park", "固件源码", "uvk1-v6.3.0", "App", "app"),
+]
+FW = next((p for p in FW_CANDIDATES if os.path.isdir(p)), FW_CANDIDATES[0])
 PY_DIR = HERE
-KT = os.path.join(WS, "多普勒", "安卓App", "android-app", "app", "src", "main", "java",
-                  "com", "f4hwn", "doppler")
+# App 源码已迁到 <workspace>/doppler-ng（包名 com.f4hwn.doppler2，多子包），
+# 旧的 多普勒/安卓App/ 副本不存在也从未入库。
+KT = os.path.join(WS, "doppler-ng", "app", "src", "main", "java",
+                  "com", "f4hwn", "doppler2")
 
 CTYPES = {
     "char": 1, "uint8_t": 1, "int8_t": 1, "bool": 1,
@@ -42,6 +48,7 @@ CTYPES = {
 }
 
 FAILS = []
+a_quiet_global = [False]
 NOTES = []
 
 
@@ -114,7 +121,16 @@ def extract_struct(hdr_text, typedef_name):
     return None
 
 
+def fw_present():
+    if os.path.isdir(FW):
+        return True
+    note("固件源码不在，跳过（找过 %s）" % " / ".join(FW_CANDIDATES))
+    return False
+
+
 def check_structs():
+    if not fw_present():
+        return
     hdr = read(os.path.join(FW, "doppler.h"))
     core = read(os.path.join(PY_DIR, "doppler_core.py"))
 
@@ -160,6 +176,8 @@ def cmd_set(text, patterns):
 
 
 def check_commands():
+    if not fw_present():
+        return
     uart = read(os.path.join(FW, "uart.c"))
     dop = read(os.path.join(FW, "doppler.c"))
     fw = cmd_set(uart + dop, [r"case\s+(0x07[0-9A-Fa-f]{2})"])
@@ -172,10 +190,11 @@ def check_commands():
         t = read(os.path.join(PY_DIR, fn))
         py |= cmd_set(t, [r"0x(076[0-9A-Fa-f]|077[0-9A-Fa-f])"])
     kt = set()
-    for fn in os.listdir(KT):
-        if not fn.endswith(".kt"):
-            continue
-        kt |= cmd_set(read(os.path.join(KT, fn)), [r"0x(076[0-9A-Fa-f]|077[0-9A-Fa-f])"])
+    for root, _dirs, files in os.walk(KT):
+        for fn in files:
+            if fn.endswith(".kt"):
+                kt |= cmd_set(read(os.path.join(root, fn)),
+                              [r"0x(076[0-9A-Fa-f]|077[0-9A-Fa-f])"])
 
     if not fw:
         fail("固件里一条 0x07xx 命令都没扫到（uart.c 路径变了？）")
@@ -202,14 +221,101 @@ def check_commands():
              % " ".join("%04X" % c for c in ghost))
 
 
+
+
+# ── 4 表几何七常量（PC / 固件 / App 三端锁死）──────────────────────────────
+# 这七个数错一个，表就会写到错误的地址或固件按错位解析 —— 而且三端都
+# 不报错，只是"写进去了、全是错数"。所以在这里做成硬相等，不等就红。
+GEOM = [
+    ("BASE",       "DPH_BASE_ADDR",   "BASE",       0x00162000),
+    ("REGION",     "DPH_REGION_SIZE", "REGION",     0x10000),
+    ("SAMPLE_OFF", "DPH_SAMPLE_OFF",  "SAMPLE_OFF", 0x1000),
+    ("PASS_MAX",   "DPH_PASS_MAX",    "PASS_MAX",   102),
+    ("ENTRY",      "DPH_ENTRY_SIZE",  "ENTRY",      40),
+    ("PT",         "DPH_PT_SIZE",     "PT",         6),
+    ("VERSION",    "DPH_VERSION",     "VERSION",    5),
+]
+
+
+def _num(txt):
+    txt = txt.strip().rstrip("uUlL")
+    return int(txt, 0)
+
+
+def read_pc(path):
+    t = read(path)
+    out = {}
+    for pc, _fw, _kt, _exp in GEOM:
+        m = re.search(r"^DPH_%s\s*=\s*(0x[0-9A-Fa-f]+|\d+)" % pc, t, re.M)
+        out[pc] = _num(m.group(1)) if m else None
+    return out
+
+
+def read_fw(path):
+    t = read(path)
+    out = {}
+    for _pc, fw, _kt, _exp in GEOM:
+        m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)" % fw, t)
+        out[_pc] = _num(m.group(1)) if m else None
+    return out
+
+
+def read_app(path):
+    t = read(path)
+    out = {}
+    for _pc, _fw, kt, _exp in GEOM:
+        m = re.search(r"const\s+val\s+%s\s*=\s*(0x[0-9A-Fa-f]+|\d+)" % kt, t)
+        out[_pc] = _num(m.group(1)) if m else None
+    return out
+
+
+def check_geometry():
+    pc_path = os.path.join(PY_DIR, "doppler_core.py")
+    kt_path = os.path.join(KT, "protocol", "TableFormat.kt")
+    pc = read_pc(pc_path)
+    kt = read_app(kt_path)
+    have_fw = fw_present()
+    fw = read_fw(os.path.join(FW, "doppler.h")) if have_fw else {k: None for k in pc}
+
+    rows = []
+    for name, _fw_name, _kt_name, expected in GEOM:
+        cells = (pc[name], fw[name], kt[name])
+        known = [c for c in cells if c is not None]
+        same = len(known) >= 2 and all(c == expected for c in known)
+        rows.append((name, cells, same))
+
+    if not a_quiet_global[0]:
+        head = "%-11s %-12s %-12s %-12s %s" % ("常量", "PC", "固件", "App", "判定")
+        print(head)
+        print("-" * len(head))
+        fmt = lambda v: "-" if v is None else ("0x%06X" % v if v > 0xFFFF else str(v))
+        for name, cells, same in rows:
+            print("%-11s %-12s %-12s %-12s %s" % (
+                name, fmt(cells[0]), fmt(cells[1]), fmt(cells[2]),
+                "一致" if same else "不一致"))
+        print()
+
+    for name, cells, same in rows:
+        if not same:
+            detail = " / ".join("%s=%s" % (k, "-" if v is None else hex(v) if v > 0xFFFF else v)
+                                for k, v in zip(("PC", "固件", "App"), cells))
+            fail(f"{name} 三端不一致：{detail}")
+    if not have_fw:
+        note("表几何：PC 与 App 已比，固件列未参与（源码不在）")
+    else:
+        note("表几何七常量三端一致（BASE/REGION/SAMPLE_OFF/PASS_MAX/ENTRY/PT/VERSION）")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
+    a_quiet_global[0] = a.quiet
 
     check_freqs()
     check_structs()
     check_commands()
+    check_geometry()
 
     if not a.quiet:
         for n in NOTES:
@@ -219,7 +325,7 @@ def main():
         for f in FAILS:
             print("  ✗ " + f)
         return 1
-    print("\n三端一致（频点 / 结构体字节数 / 命令号）")
+    print("\n三端一致（频点 / 结构体字节数 / 命令号 / 表几何七常量）")
     return 0
 
 

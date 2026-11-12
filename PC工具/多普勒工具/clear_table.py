@@ -62,7 +62,10 @@ def main():
             print(f"  → 已解锁（token=0x{token:08X}，剩余额度 {credits}），开始擦")
 
         ok = 0
-        for i in range(DPH_REGION // DPH_SECTOR):
+        # 从高地址往低地址擦，表头扇区（最低）最后擦：固件擦除命令里有归属闸门，
+        # 先擦表头会让后面每个数据扇区都判成"别人的"，白烧解锁额度甚至直接
+        # 回 OCCUPIED(4)。（2026-11-08 真机验证）
+        for i in reversed(range(DPH_REGION // DPH_SECTOR)):
             addr = DPH_BASE + i * DPH_SECTOR
             link.erase(addr)
             ok += 1

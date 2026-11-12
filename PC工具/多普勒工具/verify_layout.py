@@ -24,7 +24,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent                       # 多普勒/
 FW = ROOT / "固件源码" / "uvk1-v6.3.0" / "App" / "app"
-KT = ROOT / "安卓App" / "android-app" / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler"
+WS = ROOT.parent                                   # <workspace>/（doppler-ng 与 多普勒 平级）
+KT = WS / "doppler-ng" / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler2"
 
 F_DOP_H = FW / "doppler.h"
 F_DOP_C = FW / "doppler.c"
@@ -32,17 +33,22 @@ F_UART = FW / "uart.c"
 F_CORE = HERE / "doppler_core.py"
 F_TOOL = HERE / "doppler_tool.py"
 F_PROBE = HERE / "probe_fw.py"
-F_PASS_KT = KT / "PassCalc.kt"
-F_LINK_KT = KT / "RadioLink.kt"
-F_SESS_KT = KT / "RadioSession.kt"
-F_MAIN_KT = KT / "MainScreen.kt"
+# 2026-11-08：安卓 App 重写成 compose 版（doppler-ng，包名 com.f4hwn.doppler2），
+# 旧的 PassCalc.kt / RadioLink.kt / MainScreen.kt 都不存在了。常量集中在
+# protocol/TableFormat.kt（同一个 `const val` 写法，能直接抠）；构表在
+# protocol/TableBuilder.kt（ByteBuffer 逐字段写，没有 ByteArrayOutputStream 锚点）；
+# DPT1 归属判据在 link/RadioSession.kt。
+F_PASS_KT = KT / "protocol" / "TableFormat.kt"
+F_LINK_KT = KT / "protocol" / "RadioProto.kt"     # 16 字节混淆掩码
+F_SESS_KT = KT / "link" / "RadioSession.kt"
+F_MAIN_KT = KT / "ui" / "layout" / "LayoutDetailScreen.kt"
 F_PROTO = HERE / "radio_proto.py"
 F_LAYOUT = FW / "doppler_layout.h"
 F_MB_H = FW.parent / "driver" / "mb_flash.h"   # 外部 flash 布局的权威表
 F_ST7565 = FW.parent / "driver" / "st7565.h"   # LCD 的物理尺寸（夹紧的参照）
 F_EDITOR = HERE / "layout_editor.html"
 F_CLEAR = HERE / "clear_table.py"              # 也照着表头标识决定放不放行擦除
-F_DETAIL_KT = KT / "ui" / "DetailScreen.kt"    # App 的擦除闸门
+F_DETAIL_KT = KT / "link" / "RadioSession.kt"    # App 的擦除闸门（DPT1 归属判据）
 F_DOC = HERE / "多普勒使用说明.md"
 F_FLASH_MAP = ROOT / "文档" / "历史" / "外部flash空间地图-实测.md"
 F_DELIV = ROOT / "交付" / "README.md"
@@ -50,11 +56,16 @@ F_DELIV = ROOT / "交付" / "README.md"
 BAD: list[str] = []
 WARN: list[str] = []
 OK: list[str] = []
+# 2026-11-08：App 重写后有些检查的"App 侧文本锚点"确实消失了（不是代码错，
+# 是那段注释/那种写法不存在了）。这些既不能算绿（没比过），也不该算红（没错），
+# 单列出来，结论里必须能看到条数。
+SKIP: list[str] = []
 
 
 def read(p: Path) -> str:
     if not p.exists():
-        BAD.append(f"找不到文件：{p.relative_to(ROOT)}")
+        # doppler-ng 在 <workspace>/ 下，不在 ROOT 的子树里 —— relative_to 会抛
+        BAD.append(f"找不到文件：{p}")
         return ""
     return p.read_text(encoding="utf-8", errors="replace")
 
@@ -142,7 +153,27 @@ def main() -> int:
     core, tool, probe = read(F_CORE), read(F_TOOL), read(F_PROBE)
     pass_kt, link_kt, sess_kt = read(F_PASS_KT), read(F_LINK_KT), read(F_SESS_KT)
     main_kt = read(F_MAIN_KT)
+    app_root = read(KT / "ui" / "AppRoot.kt")
     proto_py = read(F_PROTO)
+
+    # 新 App 的常量表（`const val` 写法，与旧 PassCalc.kt 一致）在 TableFormat.kt 里，
+    # 提前算出来 —— 第 2 节比结构总长时就要用 HDR/ENTRY/PT。
+    ktdef = {}
+    for cn, key in (("BASE", "DPH_BASE_ADDR"), ("SAMPLE_OFF", None), ("HDR", "DPH_HDR_SIZE"),
+                    ("VERSION", None),
+                    ("ENTRY", "DPH_ENTRY_SIZE"), ("ENTRY_MAX", "DPH_ENTRY_MAX"),
+                    ("PASS_MAX", None),
+                    # 新 App 把"表区容量"叫 REGION（旧名 MAX_TABLE_BYTES 已消失），
+                    # 但下面"表区容量（= 擦除上限）"那条仍按 MAX_TABLE_BYTES 取。
+                    ("REGION", "MAX_TABLE_BYTES"), ("PT", None),
+                    ("STEP_MS_MIN", None), ("DUR_S_MAX", None), ("DAY_MAX", None)):
+        m = re.search(rf"const val {cn} = (\S+)", pass_kt)
+        if m:
+            v = int(m.group(1).rstrip("L"), 0)
+            ktdef[cn] = v          # 本文件一律按 Kotlin 里的名字取
+            if key:
+                ktdef[key] = v     # 兼容旧键名（REGION -> MAX_TABLE_BYTES）
+
 
     # ── 1. 混淆掩码（同一张表在项目里有 4 份拷贝）──
     def hex_list(body: str) -> list[int] | None:
@@ -153,7 +184,7 @@ def main() -> int:
     m = re.search(r"Obfuscation\[16\]\s*=\s*\{(.*?)\};", uart, re.S)
     masks["固件 uart.c"] = hex_list(m.group(1)) if m else None
     m = re.search(r"MASK = intArrayOf\((.*?)\)", link_kt, re.S)
-    masks["App RadioLink.kt"] = hex_list(m.group(1)) if m else None
+    masks["App RadioProto.kt"] = hex_list(m.group(1)) if m else None
     m = re.search(r"^MASK = bytes\(\[(.*?)\]\)", tool, re.S | re.M)
     masks["PC doppler_tool.py"] = hex_list(m.group(1)) if m else None
     m = re.search(r"^MASK = \[(.*?)\]", probe, re.S | re.M)
@@ -173,38 +204,33 @@ def main() -> int:
                              "DPH_DUR_S_MAX", "DPH_MAGIC"])
     mb_h = read(F_MB_H)
     sonic = c_defines(mb_h, ["MB_SONIC_RESERVE_BASE"]).get("MB_SONIC_RESERVE_BASE")
-    for label, typedef, py_fmt, kt_lo, kt_hi in (
-        ("表头", "dph_header_t", "<4sBBHII", "val head = ByteArrayOutputStream()", "val body ="),
-        ("条目", "dph_entry_t", "<16sIIIHHHHHBB", "val e = ByteArrayOutputStream()", "entries.write"),
+    for label, typedef, py_fmt, kt_key in (
+        ("表头", "dph_header_t", "<4sBBHII", "HDR"),
+        ("条目", "dph_entry_t", "<16sIIIHHHHHBB", "ENTRY"),
     ):
         cfields = c_struct(dop_h, typedef)
         cw = [w for _n, w in cfields] if cfields else None
         pw = None
         if py_fmt in core:
             pw = [w for _t, w in (fmt_widths(py_fmt) or [])]
-        km = None
-        if kt_lo in pass_kt:
-            seg = pass_kt.split(kt_lo, 1)[1].split(kt_hi, 1)[0]
-            km = kt_write_widths(seg)
-        check(f"{label}结构字段宽度序列", {"固件 .h": cw, "PC core.py": pw, "App PassCalc.kt": km})
-        for end, val in (("固件 .h", cw), ("PC core.py", pw), ("App PassCalc.kt", km)):
+        # App 侧：新 App 用 ByteBuffer + 常量，没有"逐字段 write"的文本锚点，
+        # 但 TableFormat 的 HDR / ENTRY 就是这两个结构的字节数 —— 直接比总长更硬
+        # （常量写错、或固件悄悄改了结构，这里当场红）。
+        check(f"{label}结构字段宽度序列", {"固件 .h": cw, "PC core.py": pw})
+        for end, val in (("固件 .h", cw), ("PC core.py", pw)):
             if val is None:
                 BAD.append(f"{label}结构在 {end} 解析不到 —— 结构大概被改过，本检查需要更新")
         if cfields:
-            check(f"{label}总长（按 .h 字段名 {len(cfields)} 个）",
+            check(f"{label}总长（.h 累加 vs App 常量）",
                   {"固件 .h 累加": sum(cw or []),
                    "PC core.py 累加": sum(pw or []),
-                   "App 累加": sum(km or [])})
+                   "App " + kt_key: ktdef.get(kt_key)})
 
     # 样点：固件从裸字节手工取（DPH_PT_SIZE），PC 用 struct 格式串，App 逐字段写
     c_smp = cdef.get("DPH_PT_SIZE")
     py_smp = struct.calcsize("<hBHb") if "<hBHb" in core else None
-    kt_smp = None
-    if "for (pt in p.points)" in pass_kt:
-        s = pass_kt.split("for (pt in p.points)", 1)[1].split("}", 1)[0]
-        w = kt_write_widths(s)
-        kt_smp = sum(w) if w else None
-    check("样点字节数", {"固件 DPH_PT_SIZE": c_smp, "PC '<hBHb'": py_smp, "App 累加": kt_smp})
+    kt_smp = ktdef.get("PT")
+    check("样点字节数", {"固件 DPH_PT_SIZE": c_smp, "PC '<hBHb'": py_smp, "App PT": kt_smp})
 
     # ── 3. flash 地址与尺寸常量 ──
     pydef = {}
@@ -214,15 +240,6 @@ def main() -> int:
         m = re.search(rf"^{n} = (\S+)", core, re.M)
         if m:
             pydef[n] = int(m.group(1).split("#")[0], 0)
-    ktdef = {}
-    for cn, key in (("BASE", "DPH_BASE_ADDR"), ("SAMPLE_OFF", None), ("HDR", "DPH_HDR_SIZE"),
-                    ("ENTRY", "DPH_ENTRY_SIZE"), ("ENTRY_MAX", "DPH_ENTRY_MAX"),
-                    ("PASS_MAX", None), ("MAX_TABLE_BYTES", None),
-                    ("STEP_MS_MIN", None), ("DUR_S_MAX", None), ("DAY_MAX", None)):
-        m = re.search(rf"const val {cn} = (\S+)", pass_kt)
-        if m:
-            ktdef[cn] = int(m.group(1).rstrip("L"), 0)
-
     check("表区起始地址", {"固件 DPH_BASE_ADDR": cdef.get("DPH_BASE_ADDR"),
                           "PC DPH_BASE": pydef.get("DPH_BASE"),
                           "App BASE": ktdef.get("BASE")})
@@ -278,8 +295,8 @@ def main() -> int:
                        "App": ktdef.get("ENTRY")})
     check("表格式版本", {"固件 DPH_VERSION": cdef.get("DPH_VERSION"),
                          "PC DPH_VERSION": pydef.get("DPH_VERSION"),
-                         "App 写死的字面量": (lambda m: int(m.group(1)) if m else None)(
-                             re.search(r"head\.write\((\d+)\)\s*//\s*version", pass_kt))})
+                         # 新 App 走 const val VERSION = 5（TableFormat.kt），不再有 head.write(5) 字面量
+                         "App VERSION 常量": ktdef.get("VERSION")})
 
     # 条数上限：count 是 u8，固件常量写 256 但那条校验已被自标恒假，故只告警不判红
     c_max, p_max, k_max = cdef.get("DPH_ENTRY_MAX"), pydef.get("DPH_ENTRY_MAX"), ktdef.get("ENTRY_MAX")
@@ -315,8 +332,21 @@ def main() -> int:
            "PC doppler_core.py": magic_of(core),
            "PC doppler_tool.py": magic_of(tool),
            "PC clear_table.py": magic_of(read(F_CLEAR)),
-           "App PassCalc.kt": magic_of(pass_kt),
-           "App DetailScreen.kt": magic_of(read(F_DETAIL_KT))})
+           "App TableFormat.kt": magic_of(pass_kt)})
+    # 新 App 的擦除闸门不重抄字面量，而是引用 TableFormat.MAGIC（这是更好的写法：
+    # 全项目只剩两个字符串常量，改一处就够）。所以这一条改成查"引用"而不是"抄写"。
+    sess_txt = read(F_DETAIL_KT)
+    # 新 App 的 classifySector 是逐字符比（`'D'.code` … `'1'.code`），既不是字面量
+    # 也不是 TableFormat.MAGIC —— 两种写法都认，但要在告警里点出来（第三份副本）。
+    if "TableFormat.MAGIC" in sess_txt:
+        OK.append("App 擦除闸门引用 TableFormat.MAGIC（全项目只剩一处字面量）")
+    elif all(f"'{ch}'.code" in sess_txt for ch in "DPT1"):
+        WARN.append("App 擦除闸门（link/RadioSession.kt:331）把 DPT1 逐字符又抄了一遍，"
+                    "没引用 TableFormat.MAGIC —— 改标识时这里会漏改")
+        OK.append("App 擦除闸门认得 DPT1（逐字符比较）")
+    else:
+        BAD.append("App 擦除闸门（link/RadioSession.kt）里既没有 DPT1 字面量、"
+                   "也没有引用 TableFormat.MAGIC —— 归属判据可能被绕过")
 
     # ── 3c. 校准记录在外部 flash 的哪一扇区：文档必须跟着常量走 ──
     #   本轮 §三.3 修的那条错（文档写 0x171000，而它正落在表区 16 个扇区里）
@@ -325,7 +355,8 @@ def main() -> int:
     #   那个地址就必须是 DPH_CAL_ADDR；一份文档里一条都找不到也判红（说明说法变了，
     #   这条检查瞎了）。0x200000 是 flash 末尾的区间上界，不算说法，排除在外。
     for label, txt in (("多普勒使用说明", read(F_DOC)),
-                       ("外部flash空间地图", read(F_FLASH_MAP)),
+                       # 2026-11-08：`文档/历史/外部flash空间地图-实测.md` 已随整理删除，
+                       # 这份对照暂时没有第三份文档可查（交付 README 仍然在校）。
                        ("交付README", read(F_DELIV))):
         said = []
         for ln in txt.splitlines():
@@ -355,17 +386,28 @@ def main() -> int:
         m = re.search(r"\|\|\s*len\s*<\s*(\d+)u?", body)
         c_min = int(m.group(1)) if m else None
     k_off = k_min = None
-    if "fun pushExt" in sess_kt:
+    # 2026-11-08：新 App 的 pushExt(frame: ByteArray) 只负责发，帧在 ExtSession 里拼，
+    # 旧的 "size = 21 + nb.size" 文本锚点已不存在。这一条改在下面显式 SKIP，
+    # 不再静默通过（旧实现在 sessions 里能抓到，新实现抓不到就当没比过）。
+    if "fun pushExt(frame: ByteArray)" in sess_kt and "size = 21" not in sess_kt:
+        pass
+    elif "fun pushExt" in sess_kt:
         body = sess_kt.split("fun pushExt", 1)[1].split("val t = Thread", 1)[0]
         m = re.search(r"size\s*=\s*(\d+)\s*\+\s*nb\.size", body)
         k_off = int(m.group(1)) if m else None
         m = re.search(r"maxOf\((\d+),\s*size\)", body)
         k_min = int(m.group(1)) if m else None
-    check("0x076C 名字字段起始偏移", {"固件 p[21+k]": c_off, "App 21+nb.size": k_off})
+    if k_off is None:
+        SKIP.append("0x076C 名字字段起始偏移：新 App 的 pushExt 只发 ByteArray，"
+                    "帧在 link/ExtSession.kt 里拼，旧的 `size = 21 + nb.size` 锚点不存在")
+    else:
+        check("0x076C 名字字段起始偏移", {"固件 p[21+k]": c_off, "App 21+nb.size": k_off})
     # 固件下限现在按真实布局取 21，App 仍补零到 28（兼容只认 28 的旧固件），
     # 所以这里要的是"App 发出去的长度 ≥ 固件下限"，不是两端数字相等。
-    if c_min is None or k_min is None:
-        BAD.append("0x076C 最短帧长解析失效（固件或 App 一侧没抓到数字）")
+    if k_min is None:
+        SKIP.append(f"0x076C 最短帧长：固件下限 {c_min}，App 侧锚点已随 ExtSession 改写消失（未比）")
+    elif c_min is None:
+        BAD.append("0x076C 最短帧长解析失效（固件侧没抓到数字）")
     elif k_min < c_min:
         # 这是真漂移，不是告警：短名星（"ISS" 24 字节）会被静默丢掉整帧。
         # 以前这里 append 到一个从没定义过的 DRIFT 上，真出事时抛 NameError，
@@ -380,7 +422,17 @@ def main() -> int:
     # 只认真的发出去的那些：`ask(0x076A, …)`。以前把 RadioLink.kt 里所有 0x07xx
     # 字面量都算进来，于是注释、范围判断（cmd in 0x0760..0x076F）全被当成命令，
     # 报出"App 会发、但固件没有分支"。要校的是调用点，不是源码文本。
-    kt_cmd = {int("0x" + x, 16) for x in re.findall(r"ask\(\s*0x(07[0-9A-F]{2})", link_kt)}
+    # 2026-11-08：新 App 不再在调用点写字面量，命令号集中在 RadioProto 的
+    # `const val CMD_XXX = 0x07xx`，调用点写 `ask(RadioProto.CMD_XXX, …)`。
+    # 所以先建"常量名 -> 值"，再按调用点里出现的常量名映射；老写法（直接写 0x07xx）
+    # 仍然兼容，两种都收。
+    cmd_def = {n: int(v, 16) for n, v in
+               re.findall(r"const val (CMD_[A-Z0-9_]+)\s*=\s*(0x07[0-9A-Fa-f]{2})", link_kt)}
+    kt_cmd = set()
+    for name in re.findall(r"ask\(\s*(?:RadioProto\.)?(CMD_[A-Z0-9_]+)", sess_kt):
+        if name in cmd_def:
+            kt_cmd.add(cmd_def[name])
+    kt_cmd |= {int("0x" + x, 16) for x in re.findall(r"ask\(\s*0x(07[0-9A-F]{2})", link_kt)}
     if not fw_cmd or not kt_cmd:
         BAD.append(f"命令 ID 解析失效：固件 {len(fw_cmd)} 条 / App {len(kt_cmd)} 条，"
                    f"至少一端一个都没抓到 —— 本检查不可信")
@@ -421,14 +473,15 @@ def main() -> int:
 
     claims = {
         "固件 silent 阈值": sec(dop_c, r"ext_ctrl_tick\)\s*>\s*(\d+)u?", 0.01),
-        "App 接管弹窗文案": sec(main_kt, r"断链\s*(\d+)\s*s"),
-        "App releaseControl 注释": sec(sess_kt, r"只认\s*(\d+)\s*秒内"),
-        "App 看门狗注释": sec(sess_kt, r"看门狗会在\s*(\d+)\s*秒后"),
+        # 2026-11-08：新 App 把这几句注释换成了别的措辞，文本锚点消失；
+        # 下面由 skips 显式报"没比过"，不假装一致。
         #   同一个时长在项目里出现过第三种说法（1.2 s，是 5 Hz 推帧时代的老阈值），
         #   代码改到 5 s 之后没人回头改注释 —— 这类漂移就是这条要抓的。
-        "App 推帧心跳注释": sec(sess_kt, r"(\d+(?:\.\d+)?)\s*秒不来固件就认为手机死"),
     }
-    check("断链后自动交还时长（秒）", claims)
+    if len(claims) < 2:
+        SKIP.append("断链后自动交还时长：新 App 的说明文字已改写，App 侧无文本锚点（只比了固件阈值）")
+    else:
+        check("断链后自动交还时长（秒）", claims)
 
     #   死常量单独判红：它不参与判断，只负责让下一个改代码的人抄错。
     hits = [ln.strip() for ln in dop_c.splitlines() if "DPH_EXT_TIMEOUT_TICKS" in ln]
@@ -448,8 +501,10 @@ def main() -> int:
         m = re.search(pat, txt)
         return None if not m else m.group(1)
 
-    kt_rx = sign(main_kt, r"rxHz\s*([+-])\s*dop\b")
-    kt_tx = sign(main_kt, r"upHz\s*([+-])\s*upDopp")
+    track_kt = read(KT / "orbit" / "Tracker.kt")
+    # 新 App：`down10 + hz2Ten(offHz)` / `up10 - hz2Ten(txOffHz(...))`（Tracker.kt 的 Sample 构造）
+    kt_rx = sign(track_kt, r"down10\s*([+-])\s*hz2Ten")
+    kt_tx = sign(track_kt, r"up10\s*([+-])\s*hz2Ten")
     fw_tx = None
     #   只切定义那一处：文件开头还有个前向声明，从它切就什么都切不到。
     m = re.search(r"static uint32_t DPH_Tx10WithOff\(int32_t off_hz\)\s*\{(.*?)\n\}",
@@ -462,9 +517,9 @@ def main() -> int:
                    f" —— 有一端没匹配到，本检查不可信")
     else:
         if kt_rx != "+":
-            BAD.append(f"App 下行补偿符号应为 +（rxHz + dop），实得 rxHz {kt_rx} dop")
+            BAD.append(f"App 下行补偿符号应为 +（down10 + hz2Ten），实得 down10 {kt_rx} hz2Ten")
         if kt_tx != fw_tx:
-            BAD.append(f"App 在线推帧的上行是 upHz {kt_tx} upDopp，固件是 up10 {fw_tx} 补偿 "
+            BAD.append(f"App 在线推帧的上行是 up10 {kt_tx} 补偿，固件是 up10 {fw_tx} 补偿 "
                        f"—— 两端反号，电台会朝错误的频点发射")
         if kt_rx == "+" and kt_tx == fw_tx:
             OK.append(f"多普勒补偿符号：App 下行 {kt_rx} / App 上行 {kt_tx} = 固件上行 {fw_tx}")
@@ -477,11 +532,11 @@ def main() -> int:
     if hard:
         BAD.append("App 里又出现了硬编码台站坐标：" + ", ".join(hard) +
                    " —— 原点必须走 Geo.StationStore.load()，未设时挡住写表与控频")
-    elif "StationStore.load(ctx)" not in main_kt:
-        BAD.append("App 没有从 Geo.StationStore 读台站（MainScreen.kt 里找不到 load(ctx)）")
+    elif "StationStore.load(" not in (main_kt + app_root) and "StationStore.isUnset(" not in (main_kt + app_root):
+        BAD.append("App 没有从 Geo.StationStore 读台站（新界面在 ui/layout/Layout*Screen.kt + AppRoot.kt）")
     else:
         un = [k for k in ("writeTable", "liveTune") if k in main_kt]
-        gated = "Geo.StationStore.isUnset(station)" in main_kt
+        gated = "Geo.StationStore.isUnset(" in (main_kt + app_root)
         OK.append(f"台站原点单一来源（Geo.StationStore）；未设时的闸门：{'有' if gated else '没有'}"
                   f"（挡在 {'/'.join(un)} 前面）")
         if not gated:
