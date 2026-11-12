@@ -42,3 +42,19 @@ verify/bridge.log
 # 分析脚本（reverse/*.py）和结论（文档/历史/外部参考-Look4Sat.md）都留着
 reverse/look4sat-decompiled/
 tests/sim/out/
+# 20261112 推 GitHub 前清理：以下都是本机产物，不进库
+look4sat.apk
+verify/*
+# verify/README.md 是已在库里的说明，保留可见
+!verify/README.md
+_amsat_raw/
+_audit/
+_shots/
+APP截图.png
+IMG_1311.png
+PC工具/多普勒工具/OUT/
+PC工具/多普勒工具/_*.png
+PC工具/多普勒工具/_d3/
+# tools/ 里只有两个生成脚本是源码（allowlist.py / build_amateur_allow.py），
+# 审计转储（_amsat_audit.json 491 KB、_amsat_audit.md 129 KB）是 _amsat_raw 的派生物
+tools/_*

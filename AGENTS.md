@@ -6,9 +6,9 @@ PC 算过境、把「频率随时间怎么变」的表写进电台外部 flash�
 
 ## 目录
 
-> **顺序：先读本文件的「操作员怎么工作」「硬规矩」，再读** `文档/项目交接-39.md`。
-> 分工：本文件 = 目录 / 命令 / 固件 17 条修复清单 / 规矩；交接-39 = 现在是什么样 + 还剩什么没做完 + 每条规格怎么验。
-> 别把两边的内容互相抄（31~38 已在 2026-11-07 整理中删除，结论并进 39）。
+> **顺序：先读本文件的「操作员怎么工作」「硬规矩」，再读** `文档/项目说明.md`（项目是什么、目录、命令、数据流）。
+> 分工：本文件 = 目录 / 命令 / 固件 17 条修复清单 / 挂账 / 规矩；`文档/项目说明.md` = 项目是什么、目录、命令、数据流。
+> 历史交接（项目交接-25…41）已于 2026-11-08 全部删除，结论已并进本文件的修复清单与 `文档/项目说明.md`；要查原文只能翻 git 历史。
 
 ```
 固件源码/uvk1-v6.3.0/   C 固件。入口 App/app/doppler.c、doppler.h、
@@ -18,13 +18,19 @@ PC工具/多普勒工具/      doppler_tool.py + radio_proto.py + verify_*.py �
 交付/                   f4hwn.sstv.doppler.bin（当前固件）+ F4HWN-Doppler.apk（2.0.0-m5）+ README.md
 tests/sim/              PC 上的"假电台"：把 doppler.c 原样编到宿主，桩掉孔芯片，
                         断言频合/功率/相位事件流。固件源码零改动，见它的 README
-文档/                   4 份：交接-39（唯一交接文件）、UI-定案（版面契约）、
+文档/                   4 份：项目说明（项目是什么、目录、命令、数据流）、UI-定案（版面契约）、
                         真机安装-安卓、外部参考-Look4Sat。别再往里堆审计报告
 安卓App 不在本仓      源码在 <workspace>/doppler-ng/（ASCII 路径是硬要求：
                         Gradle test worker 在中文路径下整包 ClassNotFoundException）。
                         构建产物 app/build、测试素材 sstv-fixtures 都不进库（2026-11-08 起 doppler-ng 自己也有 git 仓）
 数据/sat_freq.json      频点唯一真源
 ```
+
+> **2026-11-08 精简（省 token，不参与 App 构建）**：`固件源码/` 与 `PC工具/App排版器/node_modules/`
+> 已移出工作区到 `<workspace>/_park/`（固件源码 96M/4,599 文件、node_modules 74M/2,585 文件）。
+> 要编固件、跑 `tests/sim`、改版面时先搬回：
+> `mv ../_park/固件源码 . && mv ../_park/App排版器-node_modules PC工具/App排版器/node_modules`
+> （`多普勒/` 与 `doppler-ng/` 的 git 状态不受影响：固件源码在 .gitignore 第 4 行，node_modules 未跟踪）。
 
 ## 命令
 
@@ -38,7 +44,7 @@ cd 多普勒/PC工具/多普勒工具 && bash verify_all.sh --fast
 #   / s3 功率还原 / s4 整趟 600 s / s1h 长按 M 进预听 / s5 侧键一起发 / s6 纯接收星侧键二
 #   / s7 ▲▼ 改步进 / s8 预听·尾音页 TX 频率 / all（all 先跑两个静态守卫再跑全部场景）
 bash 多普勒/tests/sim/build.sh all
-# 阳性对照：先删掉某条修复，看对应场景是否变红（1..15，跑完自动还原源码；
+# 阳性对照：先删掉某条修复，看对应场景是否变红（1..16，跑完自动还原源码；
 #   10/11 守的是仿真编不到的 app.c 派发层与版面几何，12~15 守 E6/版面常驻/READY-PTT/方向）
 bash 多普勒/tests/sim/negctl.sh 9
 # 版面：操作员在排版器里排完「复制 JSON」→ 一条命令同时落固件与编辑器（别手改 doppler_layout.h）
@@ -97,15 +103,14 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
 - **版面从交接-31 起由操作员自排**：`PC工具/多普勒工具/layout_editor.html`（128×56 画布、worst-case 实时告警、
   复制 JSON/C 数组）+ `gen_layout.py` 一条命令落盘。`doppler_layout.h` 是生成物，别手改。
 - 防线：`verify_layout.py` 要求每处 `BK4819_SetFrequency(` 所在函数有真赋值 `last_freq =`；
-  `tests/sim` **15 条阳性对照**（`negctl.sh 1..15`，破坏修复→场景必红）与 **42 条断言**（`build.sh all`）；
+  `tests/sim` **16 条阳性对照**（`negctl.sh 1..16`，破坏修复→场景必红）与 **check() 76 条断言**（`build.sh all`，含 s9 校准页/断电回读）；
   `check_layout_overlap.py`（版面像素级重叠 + 内容要求）与 `check_dispatch.py`
   （app.c 派发层三条结构约束，补 sim 编不到 app.c 的那个洞）已接进 `build.sh all`。
 - 挂账：双键同按（操作员决定不修）、APK 1.5 写的表判 `BAD LAYOUT`、zip 内 bin 仍 `29b0684e…`、D5 未验证。
 
 ## 待办
 
-**排期与完成判据只在 `文档/项目交接-39.md` §三**（B 栏必须操作员上手台）；AI 能自己干的 A 栏已清零。
-这里只留技术挂账 —— 那些"知道有问题但决定不修/修不了"的：
+这里只留技术挂账 —— 那些"知道有问题但决定不修/修不了"的（排期类条目随 2026-11-08 的文档整理一并删除，历史见 git）：
 
 - 双键同按（操作员决定不修）
 - APK 1.5 写的表会被当前固件判 `BAD LAYOUT`（样点区 0x3000 vs 0x1000）
