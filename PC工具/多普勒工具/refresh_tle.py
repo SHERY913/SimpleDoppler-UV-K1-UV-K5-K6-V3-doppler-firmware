@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""刷新 TLE（多源合并版）→ 多普勒工具/tle_cache.json + 安卓App 的 assets/tles.json
+"""刷新 TLE（多源合并版）→ 多普勒工具/tle_cache.json
+
+新 App（doppler-ng）的 assets 不再由本脚本写：`assets/tles.txt` 与 `assets/freqs.json`
+由 `<workspace>/doppler-ng/tools/build_catalog.py` 生成。本脚本只管工具侧的缓存。
 
 用法
 ----
     python refresh_tle.py                  # 联网抓所有源，按 NORAD 合并后写两份
     python refresh_tle.py --check          # 只读缓存：逐颗 TLE 历元距今多少天 + 分档统计（不联网）
-    python refresh_tle.py --resync         # 不联网，只把缓存同步进 assets/tles.json
+    python refresh_tle.py --resync         # 兼容参数：新 App 的 assets 由 build_catalog.py 生成，这里只提示
     python refresh_tle.py --stale          # 只补"历元超过 14 天"的星（tleapi + SatNOGS 单星）
     python refresh_tle.py --stale 7        # 同上，把门槛改成 7 天
     python refresh_tle.py --extra          # 额外跑 SatNOGS 大库（只补已知星，刷新历元）
@@ -69,8 +72,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                      # 多普勒/PC工具
 REPO = os.path.dirname(ROOT)                      # 多普勒
 CACHE = os.path.join(HERE, "tle_cache.json")
-ASSETS = os.path.join(REPO, "安卓App", "android-app", "app",
-                      "src", "main", "assets", "tles.json")
 
 if HERE not in sys.path:                           # 允许从任意目录调用
     sys.path.insert(0, HERE)
@@ -319,7 +320,7 @@ def validate(tles):
 
 
 def write_outputs(tles, meta):
-    """写 tle_cache.json（含 _sources）和 assets/tles.json（只写前 3 项）。"""
+    """写 tle_cache.json（含 _sources）。App 侧 assets 交给 build_catalog.py。"""
     out = dict(tles)
     if meta:
         out["_sources"] = meta
@@ -327,14 +328,10 @@ def write_outputs(tles, meta):
         json.dump(out, f, ensure_ascii=False, indent=1)
     print("写入", CACHE)
 
-    os.makedirs(os.path.dirname(ASSETS), exist_ok=True)
-    # assets 只写前 3 项：App 侧按 JSONObject → JSONArray 解析，
-    # 多塞一个非数组的键虽然会被 optJSONArray 跳过，但没必要给 App 送垃圾。
-    slim = {k: v[:3] for k, v in tles.items()}
-    with open(ASSETS, "w", encoding="utf-8") as f:
-        json.dump(slim, f, ensure_ascii=False, indent=1)
-    print("写入", ASSETS)
-    return len(slim)
+    # 2026-11-08：不再写 `安卓App/.../assets/tles.json`。
+    # 那个目录早已不存在（App 换成 doppler-ng），旧代码 `os.makedirs` 会把它凭空造出来，
+    # 每次刷新都往仓库里塞 3 MB 死数据。
+    return len(tles)
 
 
 def stale_refresh(tles, days=PC_TTL_DAYS, timeout=8.0, workers=4):
@@ -461,7 +458,7 @@ def main():
                 "error": "" if not unres else f"{len(unres)} 颗源里也没有",
             })
             n = write_outputs(tles, meta)
-            print(f"\n已更新 {len(upd)} 颗并写盘（{n_before} → {len(tles)} 颗，assets {n} 条）")
+            print(f"\n已更新 {len(upd)} 颗并写盘（{n_before} → {len(tles)} 颗）")
         else:
             print("\n没有一颗被更新，缓存未改动。")
         if unres:
@@ -471,17 +468,16 @@ def main():
         return 0
 
     if resync:
-        # 只把缓存搬一份进 assets，不联网。用途：assets 落后于缓存时
-        # （上次刷新被 Ctrl-C、或者别人手工改过 assets），verify_data 会一直报
-        # "两侧 TLE 内容不一致"，而真正的修法不是再下一次数据，是把它同步过去。
+        # 兼容参数。以前是"把缓存搬进 安卓App 的 assets"，那个 App 已经不存在了；
+        # 现在 App 的 tles.txt/freqs.json 由 doppler-ng/tools/build_catalog.py 生成。
         if not old:
             print("没有缓存，先跑一次不带参数的 refresh_tle.py")
             return 1
-        n = write_outputs(old, load_meta())
-        print(f"已把 {n} 颗从缓存同步进 assets（没有联网）")
+        print(f"缓存里有 {len(old)} 颗（未联网，未改动任何文件）。")
+        print("App 侧 assets 请跑： cd <workspace>/doppler-ng && python tools/build_catalog.py")
         return 0
 
-    old_cache_size, old_asset_size = _size(CACHE), _size(ASSETS)
+    old_cache_size = _size(CACHE)
 
     include_sn = extra or extra_all
     keep = None if extra_all else (set(old) | set(PRIORITY_NORADS))
@@ -610,12 +606,11 @@ def main():
     report(good, "\n新数据")
 
     meta = build_meta(results, gapfill, prev=load_meta())
-    n_assets = write_outputs(good, meta)
+    write_outputs(good, meta)
 
     print(f"\n条目：{len(old)} → {len(good)} 颗")
     print(f"tle_cache.json: {old_cache_size} → {_size(CACHE)} B  "
           f"（+_sources 元数据 {len(meta)} 条）")
-    print(f"assets/tles.json: {old_asset_size} → {_size(ASSETS)} B  （{n_assets} 条）")
 
     # 顺手报一下这次刷新值多少：最常见的星在不在
     for n in ("25544", "43700", "7530"):

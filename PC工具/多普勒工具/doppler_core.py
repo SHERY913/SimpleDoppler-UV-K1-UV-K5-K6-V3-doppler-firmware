@@ -31,6 +31,7 @@ DPH_ENTRY = 40
 DPH_PT = 6                 # 一个样点：int16 偏移 + u8 仰角 + u16 斜距 + int8 变化率
 DPH_ENTRY_MAX = 255        # 表头 count 是 u8，256 会直接 struct.error
 DPH_SAMPLE_OFF = 0x1000        # 表头区留一整个扇区：样点从第二扇区起
+# 表长 = DPH_SAMPLE_OFF + DPH_PT × Σpts；条目区固定占满 0x1000，凑不满补 0
 DPH_SECTOR = 0x1000
 # 64 KiB：0x162000..0x172000。下沿是 APP_SLOT_BASE(48) = 0x102000 + 48*0x2000
 # （app_overlay.h），上沿离汉化包 16x16 字库（0x180000）还留 56 KiB 缓冲，
@@ -158,6 +159,7 @@ class Sat:
         self.downlink = downlink or f"{freq_mhz:.3f} MHz"
         self.tle = None                   # (name, line1, line2)
         self.tle_age = None
+        self.transponders = []            # sat_freq.fill() 挂上的可选频点
 
     @property
     def freq10(self):

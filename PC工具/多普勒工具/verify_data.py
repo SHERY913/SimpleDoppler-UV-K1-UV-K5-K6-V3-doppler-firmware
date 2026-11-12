@@ -27,10 +27,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent          # PC工具/多普勒工具
 ROOT = HERE.parent.parent                       # 多普勒/
-APP = ROOT / "安卓App" / "android-app"
+# App 已搬到 <workspace>/doppler-ng/（包名 com.f4hwn.doppler2），旧路径 多普勒/安卓App/
+# 从来没进过库。资产也换了形态：TLE 从 tles.json 变成三行文本 tles.txt，
+# 频点从手写的 Freqs.kt 变成 build_catalog.py 生成的 freqs.json。
+WS = ROOT.parent
+APP = WS / "doppler-ng"
 CACHE = HERE / "tle_cache.json"
-ASSETS = APP / "app" / "src" / "main" / "assets" / "tles.json"
-FREQS_KT = APP / "app" / "src" / "main" / "java" / "com" / "f4hwn" / "doppler" / "Freqs.kt"
+ASSETS = APP / "app" / "src" / "main" / "assets" / "tles.txt"
+FREQS_JSON = APP / "app" / "src" / "main" / "assets" / "freqs.json"
 
 # UV-K5/K1 的接收范围（MHz），超出就不可能收到
 RADIO_MIN_MHZ, RADIO_MAX_MHZ = 18.0, 1300.0
@@ -72,7 +76,14 @@ def tle_epoch(line1: str) -> datetime:
 
 
 def tle_satnum(line: str) -> str:
-    return line[2:7].strip()
+    """TLE 里的卫星编号（第 3..7 列）。
+
+    **必须归一成 int 字符串**：TLE 是定宽格式，`07530` 这种带前导零；
+    而 freqs.json / tle_cache.json 的键是 `7530`。不归一的话两套键永远对不上，
+    对比时会报出上千条"只在某一侧有"的假红（2026-11-08 踩过）。
+    """
+    raw = line[2:7].strip()
+    return str(int(raw)) if raw.isdigit() else raw
 
 
 def mean_motion(line2: str) -> float:
@@ -127,21 +138,58 @@ def load(path: Path) -> dict[str, list[str]]:
     return out
 
 
-def load_freqs() -> dict[str, tuple[float, float, float]]:
-    """从 Freqs.kt 里抠 norad -> (downMhz, upMhz, tone)。"""
-    if not FREQS_KT.exists():
-        p0("缺 Freqs.kt")
+def load_tles_txt(path: Path) -> dict[str, list[str]]:
+    """freqs 那套之外 App 还有一份 tles.txt：每颗星三行（名称 / line1 / line2）。
+
+    比 tles.json 脆一点（对齐靠行数），所以这里逐块校验 line1 以 '1 ' 开头、
+    line2 以 '2 ' 开头，错了就 P0 而不是悄悄少一颗。
+    """
+    if not path.exists():
+        p0(f"缺文件：{path.relative_to(ROOT)}")
         return {}
-    txt = FREQS_KT.read_text(encoding="utf-8")
-    out: dict[str, tuple[float, float, float]] = {}
-    for m in re.finditer(r'"(\d+)"\s*to\s*SatFreq\(([^)]*)\)', txt):
-        norad = m.group(1)
-        nums = [float(x) for x in re.findall(r"-?\d+\.?\d*", m.group(2))[:3]]
-        while len(nums) < 3:
-            nums.append(0.0)
-        out[norad] = (nums[0], nums[1], nums[2])
+    raw = [ln.rstrip("\r\n") for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()]
+    lines = [ln for ln in raw if ln.strip()]
+    out: dict[str, list[str]] = {}
+    i = 0
+    while i + 2 < len(lines) + 0 and i + 2 <= len(lines) - 1:
+        name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
+        if not (l1.startswith("1 ") and l2.startswith("2 ")):
+            p0(f"tles.txt 第 {i + 2} 行起不是 TLE 块（'{name[:24]}' 后面跟的不是 '1 '/'2 '）")
+            i += 1
+            continue
+        out[tle_satnum(l1)] = [name, l1, l2]
+        i += 3
     if not out:
-        p0("Freqs.kt 里一个星都没解析出来（正则失效？）")
+        p0("tles.txt 里一个星都没解析出来")
+    return out
+
+
+def load_freqs() -> dict[str, tuple[float, float, float]]:
+    """freqs.json 的 sats 表 -> norad -> (downMhz, upMhz, tone)。"""
+    if not FREQS_JSON.exists():
+        p0("缺 freqs.json")
+        return {}
+    try:
+        data = json.loads(FREQS_JSON.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        p0(f"freqs.json 不是合法 JSON：{e}")
+        return {}
+    sats = data.get("sats")
+    if not isinstance(sats, dict) or not sats:
+        p0("freqs.json 里没有 sats 表（格式变了？）")
+        return {}
+    out: dict[str, tuple[float, float, float]] = {}
+    for k, v in sats.items():
+        if not str(k).isdigit() or not isinstance(v, dict):
+            continue
+        try:
+            out[str(k)] = (float(v.get("down") or 0.0),
+                           float(v.get("up") or 0.0),
+                           float(v.get("tone") or 0.0))
+        except (TypeError, ValueError):
+            p0(f"freqs.json {k}：down/up/tone 不是数字")
+    if not out:
+        p0("freqs.json 里一个星都没解析出来")
     return out
 
 
@@ -149,23 +197,34 @@ def load_freqs() -> dict[str, tuple[float, float, float]]:
 def main() -> int:
     now = datetime.now(timezone.utc)
     cache = load(CACHE)
-    assets = load(ASSETS)
+    assets = load_tles_txt(ASSETS)
 
     if cache and assets:
+        # 两份东西不是同一个集合，不能直接做差集：
+        #   tle_cache.json = 工具侧全量目录（约 1.6 万颗，每次 refresh_tle 拉新的）
+        #   assets/tles.txt = App 打包进去的常用子集（约 1 千颗，build_catalog 生成）
+        # 所以"只在缓存里有"是常态（不是错误），"只在 assets 里有"才是值得看一眼的
+        # （说明这颗星在 catalog 里被删了，但 App 还带着）。内容不一致同理：
+        # assets 是打包时的快照，缓存是新拉的，两边 epoch 不同很正常。
         only_c = set(cache) - set(assets)
         only_a = set(assets) - set(cache)
-        if only_c:
-            p1(f"只在工具侧 tle_cache.json 里有：{sorted(only_c)}")
+        both = set(cache) & set(assets)
+        differ = [k for k in both if cache[k] != assets[k]]
         if only_a:
-            p1(f"只在 App assets 里有：{sorted(only_a)}")
-        for k in sorted(set(cache) & set(assets)):
-            if cache[k] != assets[k]:
-                p1(f"{k} {cache[k][0]}：两侧 TLE 内容不一致（App 里的可能没同步）")
+            p2(f"App assets 里有、工具缓存里没有（catalog 可能已删）：{sorted(only_a)}")
+        if both:
+            p2(
+                f"App assets {len(assets)} 颗 ⊂ 工具缓存 {len(cache)} 颗"
+                f"（{len(only_c)} 颗只在缓存里 = 全量目录，正常）；"
+                f"内容不一致 {len(differ)}/{len(both)} 颗（assets 是打包快照，正常）"
+            )
+        if not both:
+            p1("App assets 与工具缓存没有任何交集 —— 两边的编号体系可能又对不上了")
 
     freqs = load_freqs()
     for norad in freqs:
         if norad not in assets:
-            p2(f"Freqs.kt 有 {norad}，但 assets 里没有它的 TLE —— 列表是拿 TLE 建的，"
+            p2(f"freqs.json 有 {norad}，但 tles.txt 里没有它的 TLE —— 列表是拿 TLE 建的，"
                f"这条属于死数据，界面永远看不到它")
 
     from sgp4.api import Satrec, WGS72, jday  # 延迟导入，缺库时报错更清楚
@@ -204,7 +263,12 @@ def main() -> int:
             else:
                 err24 = e
             if e != 0:
-                p0(f"{norad} {name}: sgp4 在 t=+{hours}h 报错 {e}")
+                # sgp4 错误码 6 = 卫星已经再入。catalog 里留着这种条目不会算错，
+                # 只会白跑一条永远不出现的过境 —— 降到 P1 并提示剔除。
+                if e == 6:
+                    p1(f"{norad} {name}: sgp4 报 6（已再入），catalog 里是僵尸条目，建议剔除")
+                else:
+                    p0(f"{norad} {name}: sgp4 在 t=+{hours}h 报错 {e}")
         if err0 and err0[0] == 0 and err0[1]:
             alt = math.sqrt(sum(c * c for c in err0[1])) - 6378.135
             if alt < 100.0:
@@ -215,22 +279,32 @@ def main() -> int:
     # 频率检查
     for norad, (name, *_rest) in [(k, v) for k, v in assets.items()]:
         pass
+    out_of_range: list[tuple[str, str, str, float]] = []
+    near_same: list[tuple[str, str, float, float]] = []
     for norad, (down, up, tone) in sorted(freqs.items()):
         nm = assets.get(norad, [norad])[0]
         for label, f in (("下行", down), ("上行", up)):
             if f == 0.0:
                 continue
             if not (RADIO_MIN_MHZ <= f <= RADIO_MAX_MHZ):
-                p1(f"Freqs {norad} {nm}: {label} {f} MHz 超出 UV-K5 接收范围 "
-                   f"({RADIO_MIN_MHZ:.0f}-{RADIO_MAX_MHZ:.0f}) —— 收不到，只能看数据")
+                # 这类是"目录里带着、但手台收不到"的数据星（S 波段/毫米波）。
+                # 455 颗逐条打会把 P1 淹掉，聚合成一条，只列前 5 个样本。
+                out_of_range.append((norad, nm, label, f))
         # 1.0 MHz 会把"V/V 或 U/U 跨频中继"也当成错误：CSS 就是
         # 145.985 下行 / 145.850 上行，只差 135 kHz，但它是真中继。
         # 真正错的是"上下行完全一样"，那是 simplex 记录被当成转发器。
         if down and up and abs(down - up) < 0.05:
-            p1(f"Freqs {norad} {nm}: 下行 {down} 与上行 {up} MHz 几乎同频，"
-               f"除非是 simplex，否则写反或填错")
+            near_same.append((norad, nm, down, up))
         if tone < 0 or tone > 254:
             p2(f"Freqs {norad} {nm}: 哑音 {tone} Hz 不像 CTCSS 标准值")
+
+    if out_of_range:
+        sample = ", ".join(f"{n} {nm} {lb} {f}" for n, nm, lb, f in out_of_range[:5])
+        p2(f"目录里有 {len(out_of_range)} 条频点超出 UV-K5 接收范围 "
+           f"({RADIO_MIN_MHZ:.0f}-{RADIO_MAX_MHZ:.0f} MHz)，手台收不到、只能看数据；样本：{sample}")
+    if near_same:
+        p1(f"{len(near_same)} 条上下行几乎同频（除非 simplex，否则写反）："
+           + ", ".join(f"{n} {nm}" for n, nm, _d, _u in near_same[:8]))
 
     # 输出
     print(f"TLE 资产：{len(assets)} 颗（其中深空 {deep_count} 颗），"

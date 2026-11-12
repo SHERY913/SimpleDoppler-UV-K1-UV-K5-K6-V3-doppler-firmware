@@ -1,10 +1,11 @@
 {
   "_note": "卫星频点唯一数据源。App 的 Freqs.kt 与 PC 工具的 sat_freq.py 都从这里生成/校验，别再各写一份。",
-  "_units": "down/up/sstv/voice_* 单位 MHz；tone 单位 Hz（0 = 无哑音）；up = 0 表示无上行或未知。",
+  "_units": "down/up/sstv/voice_* 单位 MHz；tone 单位 Hz（0 = 无哑音）；up = 0 表示无上行或未知；transponders[].down/up 单位 MHz、tone 单位 Hz，第 0 条是默认/主用下行。",
   "_rules": [
     "只写有出处的数值：AMSAT 频率表 / IARU 协调结果 / 卫星团队的公告。拿不准就写 0，界面会显示'无频点'，不要猜。",
     "tone 指**上行**哑音（决定能不能打开转发器）。下行哑音没有意义，不记。",
-    "线性转发器记中心频率，带宽写进 blurb。"
+    "线性转发器记中心频率，带宽写进 blurb。",
+    "transponders 是同一颗星的全部可用频点，写表和界面都按选中的那条走；第 0 条必须与 down/up/tone 完全一致（老字段留给 App 与 --check 读）。"
   ],
   "generated_by": "多普勒/PC工具/多普勒工具/gen_sat_freq.py",
   "sats": {
@@ -14,10 +15,40 @@
       "up": 145.99,
       "tone": 67.0,
       "mode": "FM 中继",
-      "sstv": 145.8,
+      "sstv": 437.55,
       "voice_rx": 145.8,
       "voice_tx": 144.49,
-      "blurb": "国际空间站。中继 收 437.800 / 发 145.990（67 Hz）；语音直通 收 145.800 / 发 144.490（欧洲 145.200）；SSTV 145.800 只收。437.550 是 UHF 分组频道，不是语音下行。"
+      "blurb": "国际空间站。中继 收 437.800 / 发 145.990（67 Hz，2026-10 未按计划开启）；SSTV 收 437.550（Robot 36，±10 kHz，2026-04-10 起）；语音直通 收 145.800 / 发 144.490（欧洲 145.200）；APRS 437.825（到 2026 年底）。145.800 已不用于 SSTV，145.825 是旧 APRS 值。",
+      "transponders": [
+        {
+          "name": "FM 中继",
+          "down": 437.8,
+          "up": 145.99,
+          "tone": 67.0,
+          "note": "2026-10 未按计划开启，状态不稳"
+        },
+        {
+          "name": "SSTV",
+          "down": 437.55,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "Robot 36，±10 kHz，2026-04-10 起；145.800 已不用于 SSTV"
+        },
+        {
+          "name": "语音直通",
+          "down": 145.8,
+          "up": 144.49,
+          "tone": 0.0,
+          "note": "ARISS 学校通联仍用；欧洲上行 145.200"
+        },
+        {
+          "name": "APRS",
+          "down": 437.825,
+          "up": 437.825,
+          "tone": 0.0,
+          "note": "到 2026 年底；145.825 是旧值"
+        }
+      ]
     },
     "7530": {
       "name": "AO-7",
@@ -25,7 +56,17 @@
       "up": 432.15,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "1974 年发射，仍在工作的最老业余卫星。模式 B：上行 432.125~432.175，下行 145.975。只在日照期工作。"
+      "blurb": "1974 年发射，仍在工作的最老业余卫星。模式 B：上行 432.125~432.175，下行 145.975。只在日照期工作。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.975,
+          "up": 432.15,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43017": {
       "name": "AO-91",
@@ -33,7 +74,17 @@
       "up": 435.25,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "Fox-1B，FM 跨段：上行 435.250、下行 145.960，67 Hz。主要覆盖美洲。"
+      "blurb": "Fox-1B，FM 跨段：上行 435.250、下行 145.960，67 Hz。主要覆盖美洲。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.96,
+          "up": 435.25,
+          "tone": 67.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "27607": {
       "name": "SO-50",
@@ -41,7 +92,16 @@
       "up": 145.85,
       "tone": 74.4,
       "mode": "FM",
-      "blurb": "沙特卫星。上行 145.850 先发 74.4 Hz 唤醒，唤醒后约 10 分钟可用；下行 436.795。"
+      "blurb": "沙特卫星。上行 145.850 先发 74.4 Hz 唤醒，唤醒后约 10 分钟可用；下行 436.795。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.795,
+          "up": 145.85,
+          "tone": 74.4,
+          "note": ""
+        }
+      ]
     },
     "24278": {
       "name": "FO-29",
@@ -49,7 +109,16 @@
       "up": 145.9,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "JAS-2（日本），线性转发器：上行 145.900~146.000，下行 435.800~435.900。信号强，适合练 SSB。"
+      "blurb": "JAS-2（日本），线性转发器：上行 145.900~146.000，下行 435.800~435.900。信号强，适合练 SSB。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.8,
+          "up": 145.9,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "44909": {
       "name": "RS-44",
@@ -57,15 +126,34 @@
       "up": 145.965,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "俄罗斯线性转发器，下行 435.610 附近，带宽较宽，欧洲与亚洲都能听到。"
+      "blurb": "俄罗斯线性转发器，下行 435.610 附近，带宽较宽，欧洲与亚洲都能听到。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.61,
+          "up": 145.965,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "39444": {
       "name": "AO-73",
-      "down": 145.935,
+      "down": 145.95,
       "up": 435.15,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "FUNcube-1，线性转发器：上行 435.130~435.150，下行 145.935。长期稳定工作。"
+      "blurb": "FUNcube-1，线性转发器：上行 435.130~435.150，下行 145.950。长期稳定工作。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.95,
+          "up": 435.15,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "43770": {
       "name": "AO-95",
@@ -73,7 +161,17 @@
       "up": 435.3,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "Fox-1Cliff，FM 跨段：上行 435.300、下行 145.920，67 Hz。"
+      "blurb": "Fox-1Cliff，FM 跨段：上行 435.300、下行 145.920，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.92,
+          "up": 435.3,
+          "tone": 67.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "50466": {
       "name": "XW-3 希望三号",
@@ -81,7 +179,17 @@
       "up": 145.85,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "中国希望三号（CAS-9），线性转发器，下行 435.725 附近。"
+      "blurb": "中国希望三号（CAS-9），线性转发器，下行 435.725 附近。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.725,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43678": {
       "name": "PO-101",
@@ -89,7 +197,17 @@
       "up": 437.5,
       "tone": 141.3,
       "mode": "FM",
-      "blurb": "DIWATA-2（菲律宾）。FM 跨段：下行 145.900、上行 437.500，哑音 141.3 Hz。"
+      "blurb": "DIWATA-2（菲律宾）。FM 跨段：下行 145.900、上行 437.500，哑音 141.3 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.9,
+          "up": 437.5,
+          "tone": 141.3,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43803": {
       "name": "JO-97 / JY1SAT",
@@ -97,7 +215,16 @@
       "up": 435.1,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "约旦 JY1SAT（= JO-97），FM 跨段：上行 435.100、下行 145.855，67 Hz。"
+      "blurb": "约旦 JY1SAT（= JO-97），FM 跨段：上行 435.100、下行 145.855，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.855,
+          "up": 435.1,
+          "tone": 67.0,
+          "note": ""
+        }
+      ]
     },
     "14129": {
       "name": "AO-10",
@@ -105,7 +232,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "老卫星，下行 145.825，姿态已失控，只在少数时候能听到信标。"
+      "blurb": "老卫星，下行 145.825，姿态已失控，只在少数时候能听到信标。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "22825": {
       "name": "AO-27",
@@ -113,7 +250,17 @@
       "up": 145.85,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "FM 跨段：上行 145.850、下行 436.795，无哑音。发射窗口由卫星定时器控制。"
+      "blurb": "FM 跨段：上行 145.850、下行 436.795，无哑音。发射窗口由卫星定时器控制。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.795,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "25397": {
       "name": "GO-32",
@@ -121,7 +268,17 @@
       "up": 145.85,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "TechSat-Gurwin，下行 435.225，数据/语音混合任务。"
+      "blurb": "TechSat-Gurwin，下行 435.225，数据/语音混合任务。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 435.225,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "26931": {
       "name": "NO-44 PCSAT",
@@ -129,7 +286,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "APRS",
-      "blurb": "APRS 数字中继，收发都在 145.825。适合验证链路，不适合语音。"
+      "blurb": "APRS 数字中继，收发都在 145.825。适合验证链路，不适合语音。",
+      "transponders": [
+        {
+          "name": "APRS",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "20442": {
       "name": "LO-19",
@@ -137,7 +303,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "巴西立方星，437.125 上发 CW 信标。"
+      "blurb": "巴西立方星，437.125 上发 CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.125,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "27844": {
       "name": "CO-55",
@@ -145,7 +321,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "Cute-1.7 + APD，437.470 上发 CW/数据信标。"
+      "blurb": "Cute-1.7 + APD，437.470 上发 CW/数据信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.47,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "27848": {
       "name": "CO-57",
@@ -153,7 +339,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "XI-IV，437.470 上发 CW 信标。"
+      "blurb": "XI-IV，437.470 上发 CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.47,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "28895": {
       "name": "XI-V",
@@ -161,7 +357,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "东京大学立方星，437.345 上发 CW 信标。"
+      "blurb": "东京大学立方星，437.345 上发 CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.345,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "27939": {
       "name": "HO-68",
@@ -169,7 +375,17 @@
       "up": 145.825,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "希望一号（XW-1），线性转发器：上行 145.825、下行 435.675~435.790。"
+      "blurb": "希望一号（XW-1），线性转发器：上行 145.825、下行 435.675~435.790。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.79,
+          "up": 145.825,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "40967": {
       "name": "AO-85",
@@ -177,7 +393,17 @@
       "up": 435.18,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "Fox-1A，FM 跨段：上行 435.170~435.180、下行 145.980，67 Hz。"
+      "blurb": "Fox-1A，FM 跨段：上行 435.170~435.180、下行 145.980，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.98,
+          "up": 435.18,
+          "tone": 67.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "53109": {
       "name": "IO-117 GreenCube",
@@ -185,7 +411,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "意大利 GreenCube，435.310 上的数字转发器（收发同频），需要 9k6 数据模式。"
+      "blurb": "意大利 GreenCube，435.310 上的数字转发器（收发同频），需要 9k6 数据模式。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.31,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "14781": {
       "name": "UO-11",
@@ -193,7 +429,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "英国 UoSAT-2，145.825 发 1200bd 遥测信标，已失效。"
+      "blurb": "英国 UoSAT-2，145.825 发 1200bd 遥测信标，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "32785": {
       "name": "CO-65",
@@ -201,7 +447,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "日本 CUTE 星，437.475 发 CW/AFSK 遥测，已退役。"
+      "blurb": "日本 CUTE 星，437.475 发 CW/AFSK 遥测，已退役。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.275,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "32791": {
       "name": "CO-66",
@@ -209,7 +465,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "语音",
-      "blurb": "东工大 CUTE-1.7，437.485 发 AFSK 遥测，已失效。"
+      "blurb": "东工大 CUTE-1.7，437.485 发 AFSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "语音",
+          "down": 437.485,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "32953": {
       "name": "RS-30",
@@ -217,7 +483,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "俄罗斯 RS-30，435.315 发 DOKA 格式遥测，仅信标无转发器。"
+      "blurb": "俄罗斯 RS-30，435.315 发 DOKA 格式遥测，仅信标无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.215,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "37841": {
       "name": "SRMSAT",
@@ -225,7 +501,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "印度 SRM 大学卫星，437.425 发 1200bd 遥测，已失效。"
+      "blurb": "印度 SRM 大学卫星，437.425 发 1200bd 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.425,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "39417": {
       "name": "ZACUBE-1",
@@ -233,15 +519,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "南非 TshepisoSAT，437.356 发 9k6 遥测信标，现役。"
-    },
-    "39428": {
-      "name": "Delfi-N3xt",
-      "down": 145.87,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "遥测",
-      "blurb": "代尔夫特理工 3U 星，145.870 发 BPSK 遥测，转发器已停用。"
+      "blurb": "南非 TshepisoSAT，437.356 发 9k6 遥测信标，现役。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.356,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "39430": {
       "name": "GOMX-1",
@@ -249,7 +537,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "丹麦 GOMX-1，437.250 发 9k6 遥测，已失效。"
+      "blurb": "丹麦 GOMX-1，437.250 发 9k6 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.25,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "39440": {
       "name": "LO-74",
@@ -257,7 +555,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "阿根廷 CubeBug-2，437.445 发 1k2/9k6 遥测，无转发器。"
+      "blurb": "阿根廷 CubeBug-2，437.445 发 1k2/9k6 遥测，无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.445,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "40908": {
       "name": "LILACSAT-2",
@@ -265,7 +573,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "哈工大 CAS-3H，437.200 发 CW/BPSK 遥测，转发器停用。"
+      "blurb": "哈工大 CAS-3H，437.200 发 CW/BPSK 遥测，转发器停用。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.2,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "41603": {
       "name": "Lapan A3",
@@ -273,7 +590,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "印尼 LAPAN-A3，437.425 发 FFSK 遥测，非业余载荷。"
+      "blurb": "印尼 LAPAN-A3，437.425 发 FFSK 遥测，非业余载荷。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.325,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "41847": {
       "name": "CAS-2T",
@@ -281,7 +608,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "中国 CAS-2T，现仅 435.710 发 CW 信标，FM 转发器停用。"
+      "blurb": "中国 CAS-2T，现仅 435.710 发 CW 信标，FM 转发器停用。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 435.71,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "42829": {
       "name": "TechnoSat",
@@ -289,7 +626,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "柏林工大 TechnoSat，435.950 发 GMSK 遥测，已失效。"
+      "blurb": "柏林工大 TechnoSat，435.950 发 GMSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43186": {
       "name": "S-Net D",
@@ -297,7 +644,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。"
+      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43187": {
       "name": "S-Net B",
@@ -305,7 +662,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。"
+      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43188": {
       "name": "S-Net A",
@@ -313,7 +680,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。"
+      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43189": {
       "name": "S-Net C",
@@ -321,7 +698,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。"
+      "blurb": "柏林工大 S-Net 四星之一，435.950 发 FFSK 遥测，无转发器。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43677": {
       "name": "Ten-Koh",
@@ -329,7 +716,17 @@
       "up": 435.28,
       "tone": 0.0,
       "mode": "数据",
-      "blurb": "日本九州工大 Ten-Koh，437.390 发 1k2/9k6 遥测，已失效。"
+      "blurb": "日本九州工大 Ten-Koh，437.390 发 1k2/9k6 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "数据",
+          "down": 437.39,
+          "up": 435.28,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43758": {
       "name": "MinXSS-2",
@@ -337,7 +734,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "美国 MinXSS-2 科学星，437.250 发 9k6 遥测，已失效。"
+      "blurb": "美国 MinXSS-2 科学星，437.250 发 9k6 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.25,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43782": {
       "name": "SNUSat 2",
@@ -345,7 +752,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "首尔大学 SNUSat-2，437.625 发 9k6 BPSK 遥测，已失效。"
+      "blurb": "首尔大学 SNUSat-2，437.625 发 9k6 BPSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.625,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43784": {
       "name": "SnugLite",
@@ -353,7 +770,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "首尔大学 SnugLite，437.275 发 9k6 GMSK 遥测，已失效。"
+      "blurb": "首尔大学 SnugLite，437.275 发 9k6 GMSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.275,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43786": {
       "name": "ITASat 1",
@@ -361,7 +788,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "巴西 ITA 卫星，145.860 发 1200bd BPSK 遥测，已失效。"
+      "blurb": "巴西 ITA 卫星，145.860 发 1200bd BPSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 145.86,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43790": {
       "name": "EAGLET 1",
@@ -369,7 +806,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "意大利 EAGLET-1，435.200 发遥测，已失效。"
+      "blurb": "意大利 EAGLET-1，435.200 发遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.2,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43792": {
       "name": "ESEO",
@@ -377,7 +824,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "语音",
-      "blurb": "欧空局 ESEO，437.000 发 GMSK 遥测，转发器从未启用。"
+      "blurb": "欧空局 ESEO，437.000 发 GMSK 遥测，转发器从未启用。",
+      "transponders": [
+        {
+          "name": "语音",
+          "down": 145.895,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43804": {
       "name": "Suomi 100",
@@ -385,7 +842,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "芬兰 Suomi 100 纪念星，437.775 发 9k6 遥测，已失效。"
+      "blurb": "芬兰 Suomi 100 纪念星，437.775 发 9k6 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.775,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "43880": {
       "name": "UWE-4",
@@ -393,7 +860,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "维尔茨堡大学 UWE-4，435.600 发遥测，已失效。"
+      "blurb": "维尔茨堡大学 UWE-4，435.600 发遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.6,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "44530": {
       "name": "Taurus 1",
@@ -401,7 +878,17 @@
       "up": 145.82,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "立陶宛 Taurus-1，436.760 V/U FM 转发器，67Hz 亚音。"
+      "blurb": "立陶宛 Taurus-1，436.760 V/U FM 转发器，67Hz 亚音。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.76,
+          "up": 145.82,
+          "tone": 67.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "44881": {
       "name": "TO-108",
@@ -409,7 +896,17 @@
       "up": 435.27,
       "tone": 0.0,
       "mode": "SSB/CW",
-      "blurb": "CAS-6，145.925 线性转发器下行，上行 435.280。"
+      "blurb": "CAS-6，145.925 线性转发器下行，上行 435.280。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.915,
+          "up": 435.27,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "46495": {
       "name": "SALSAT",
@@ -417,7 +914,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "柏林工大 SALSAT，435.950 发 1k2 AFSK 遥测，已失效。"
+      "blurb": "柏林工大 SALSAT，435.950 发 1k2 AFSK 遥测，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.95,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "48274": {
       "name": "CSS (TIANHE-1)",
@@ -425,7 +932,17 @@
       "up": 145.85,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "中国空间站天和舱，436.510 V/U FM 中继，上行 145.875。"
+      "blurb": "中国空间站天和舱，436.510 V/U FM 中继，上行 145.875。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.985,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "49396": {
       "name": "TeikyoSat 4",
@@ -433,7 +950,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "帝京大 TeikyoSat-4，437.450 发遥测，已失效。"
+      "blurb": "帝京大 TeikyoSat-4，437.450 发遥测，已失效。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.45,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "49399": {
       "name": "Z-Sat",
@@ -441,7 +968,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "三菱 Z-Sat，145.875 发 9k6 GMSK 遥测，BBS 中继已停。"
+      "blurb": "三菱 Z-Sat，145.875 发 9k6 GMSK 遥测，BBS 中继已停。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 145.875,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "49402": {
       "name": "KOSEN 1",
@@ -449,7 +986,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "高专 KOSEN-1，435.525 发遥测，另做 HF 接收试验。"
+      "blurb": "高专 KOSEN-1，435.525 发遥测，另做 HF 接收试验。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.525,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "52899": {
       "name": "SNUGLITE 2",
@@ -457,7 +1004,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "首尔大学 SNUGLITE-II，436.490 发 9k6 遥测，现役。"
+      "blurb": "首尔大学 SNUGLITE-II，436.490 发 9k6 遥测，现役。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.49,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "57172": {
       "name": "UmKA 1 (RS40S)",
@@ -465,7 +1022,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "俄 RS40S/UmKA-1，437.625 发 GMSK 遥测与 SSTV。"
+      "blurb": "俄 RS40S/UmKA-1，437.625 发 GMSK 遥测与 SSTV。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.625,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "57175": {
       "name": "CubeBel-2 (EU11S)",
@@ -473,7 +1039,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "白俄 CubeBel-2，436.990 发 4k8/9k6 GMSK 遥测。"
+      "blurb": "白俄 CubeBel-2，436.990 发 4k8/9k6 GMSK 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.99,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "57189": {
       "name": "RS-38S",
@@ -481,15 +1057,33 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "俄 RS-38S(VIZARD)，437.825 发 GMSK 遥测。"
+      "blurb": "俄 RS-38S(VIZARD)，437.825 发 GMSK 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "59112": {
       "name": "SONATE-2",
-      "down": 145.84,
+      "down": 145.825,
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "维尔茨堡大学 SONATE-2，437.025 发遥测，另有 APRS。"
+      "blurb": "维尔茨堡大学 SONATE-2，437.025 发遥测，另有 APRS。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "60237": {
       "name": "GRBBeta",
@@ -497,7 +1091,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "捷克 1.5U，436.785 发 9k6 GMSK/CW 遥测，在役。"
+      "blurb": "捷克 1.5U，436.785 发 9k6 GMSK/CW 遥测，在役。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.785,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "60242": {
       "name": "Curium One",
@@ -505,7 +1108,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "436.240 发 50k GMSK 遥测，ESA 教育星。"
+      "blurb": "436.240 发 50k GMSK 遥测，ESA 教育星。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.24,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "60243": {
       "name": "ROBUSTA-3A",
@@ -513,7 +1126,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "法国蒙彼利埃 3U，436.750 发 9k6 GMSK 遥测，在役。"
+      "blurb": "法国蒙彼利埃 3U，436.750 发 9k6 GMSK 遥测，在役。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.75,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "60246": {
       "name": "CatSat",
@@ -521,7 +1144,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "437.185 发 2k4 FSK AX.100，复位后曾改用 437.250。"
+      "blurb": "437.185 发 2k4 FSK AX.100，复位后曾改用 437.250。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.185,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "61781": {
       "name": "AO-123",
@@ -529,7 +1161,16 @@
       "up": 145.85,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "ASRTU-1，FM 转发器 435.400/145.850，9k6 遥测。"
+      "blurb": "ASRTU-1，FM 转发器 435.400/145.850，9k6 遥测。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 435.4,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "62391": {
       "name": "LASARsat",
@@ -537,7 +1178,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "436.925 发 9k6 GFSK 与 CW 信标，U/U 数字中继。"
+      "blurb": "436.925 发 9k6 GFSK 与 CW 信标，U/U 数字中继。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.925,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "62394": {
       "name": "CroCube",
@@ -545,7 +1195,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "克罗地亚 1U，436.775 发 CW 与 9k6 GFSK 遥测。"
+      "blurb": "克罗地亚 1U，436.775 发 CW 与 9k6 GFSK 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.775,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "63210": {
       "name": "JINJUSat 1B",
@@ -553,7 +1212,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "韩国 1U，435.185 发 9k6 BPSK AX.25 遥测。"
+      "blurb": "韩国 1U，435.185 发 9k6 BPSK AX.25 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 435.185,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63211": {
       "name": "NUSHSAT 1",
@@ -561,7 +1230,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "新加坡国大附中 1U，436.200 发 1k2/2k4 AX.100 遥测。"
+      "blurb": "新加坡国大附中 1U，436.200 发 1k2/2k4 AX.100 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.2,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63213": {
       "name": "TEVEL2-4",
@@ -569,7 +1248,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63214": {
       "name": "TEVEL2-5",
@@ -577,7 +1266,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63215": {
       "name": "TEVEL2-6",
@@ -585,7 +1284,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63217": {
       "name": "TEVEL2-1",
@@ -593,7 +1302,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63218": {
       "name": "TEVEL2-3",
@@ -601,7 +1320,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，2026 年恢复。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，2026 年恢复。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63219": {
       "name": "TEVEL2-2",
@@ -609,7 +1338,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63237": {
       "name": "TEVEL2-9",
@@ -617,7 +1356,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63238": {
       "name": "TEVEL2-7",
@@ -625,7 +1374,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，2026 年恢复。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，2026 年恢复。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "63239": {
       "name": "TEVEL2-8",
@@ -633,7 +1392,17 @@
       "up": 145.97,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。"
+      "blurb": "以色列学生星，FM 转发器 436.400/145.970，9k6 信标。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.4,
+          "up": 145.97,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "66657": {
       "name": "SPIRONE",
@@ -641,7 +1410,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "2025-11 发射的 1U，436.650 发 9k6 GMSK 遥测。"
+      "blurb": "2025-11 发射的 1U，436.650 发 9k6 GMSK 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.65,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "66660": {
       "name": "K-HERO",
@@ -649,7 +1428,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "2025-11 发射，437.180 发 4k8 MSK AX.100 遥测。"
+      "blurb": "2025-11 发射，437.180 发 4k8 MSK AX.100 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.18,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "66661": {
       "name": "SNUGLITE-III DURI",
@@ -657,7 +1446,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "首尔大学 2U，436.788 发 9k6 GMSK AX.25 遥测。"
+      "blurb": "首尔大学 2U，436.788 发 9k6 GMSK AX.25 遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.788,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "67290": {
       "name": "SAKHACUBE-CHOLBON",
@@ -665,7 +1464,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "萨哈 1U，437.350 发 2k4/9k6 GMSK 遥测与 SSTV。"
+      "blurb": "萨哈 1U，437.350 发 2k4/9k6 GMSK 遥测与 SSTV。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.35,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "67291": {
       "name": "RS95S (QMR-KWT-2)",
@@ -673,15 +1481,33 @@
       "up": 145.92,
       "tone": 67.0,
       "mode": "FM",
-      "blurb": "巴林 1U，FM 转发器 436.950/145.920，67 Hz 亚音。"
+      "blurb": "巴林 1U，FM 转发器 436.950/145.920，67 Hz 亚音。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.95,
+          "up": 145.92,
+          "tone": 67.0,
+          "note": ""
+        }
+      ]
     },
     "68261": {
       "name": "Ten-Koh2",
-      "down": 435.86,
+      "down": 435.875,
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "日本 2U，CW 信标 435.860；435.9 线性转发器暂未启用。"
+      "blurb": "日本 2U，CW 信标 435.875；435.9 线性转发器暂未启用。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 435.875,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "68417": {
       "name": "JACK-002",
@@ -689,7 +1515,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "436.300 发 9k6 FSK 遥测，引用 ITU 登记。"
+      "blurb": "436.300 发 9k6 FSK 遥测，引用 ITU 登记。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.3,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68431": {
       "name": "DISCO 2",
@@ -697,7 +1533,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "丹麦 3U，437.075 发 4k8 FSK 遥测，S 波段 2432.5。"
+      "blurb": "丹麦 3U，437.075 发 4k8 FSK 遥测，S 波段 2432.5。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.075,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68446": {
       "name": "HADES-SA (SpinnyONE)",
@@ -705,7 +1551,16 @@
       "up": 145.875,
       "tone": 0.0,
       "mode": "数据",
-      "blurb": "西班牙 1U，436.875 发 800bps FSK 与 SSDV。"
+      "blurb": "西班牙 1U，436.875 发 800bps FSK 与 SSDV。",
+      "transponders": [
+        {
+          "name": "数据",
+          "down": 436.875,
+          "up": 145.875,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "68456": {
       "name": "PARUS-6U1",
@@ -713,7 +1568,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "437.195 发 9k6 GMSK TT&C，另 2402 MHz。"
+      "blurb": "437.195 发 9k6 GMSK TT&C，另 2402 MHz。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.195,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "68458": {
       "name": "SAL-E",
@@ -721,7 +1585,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "436.965 发 9k6 FSK AX.25 信标。"
+      "blurb": "436.965 发 9k6 FSK AX.25 信标。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.965,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68792": {
       "name": "FSI-SAT 2",
@@ -729,7 +1603,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "2026-04 发射，437.175 发 9k6 GMSK 与 CW。"
+      "blurb": "2026-04 发射，437.175 发 9k6 GMSK 与 CW。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.175,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68795": {
       "name": "OrigamiSat 2",
@@ -737,7 +1621,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "东京工业大学 1U，437.505 发 1k2 AFSK 遥测与 CW。"
+      "blurb": "东京工业大学 1U，437.505 发 1k2 AFSK 遥测与 CW。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.505,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68796": {
       "name": "ARICA 2",
@@ -745,7 +1639,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "会津大学 2U，436.830 发 4k8 GMSK 与 CW 信标。"
+      "blurb": "会津大学 2U，436.830 发 4k8 GMSK 与 CW 信标。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.83,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "68797": {
       "name": "WASEDA-SAT-ZERO-II",
@@ -753,7 +1656,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "早稻田 1U，437.200 发 1k2 FSK 遥测与 8wpm CW。"
+      "blurb": "早稻田 1U，437.200 发 1k2 FSK 遥测与 8wpm CW。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 437.2,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "68798": {
       "name": "MANGARO-II-Piscus",
@@ -761,7 +1674,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "遥测",
-      "blurb": "2026-04 发射，436.325 发 1k2/9k6 数字遥测。"
+      "blurb": "2026-04 发射，436.325 发 1k2/9k6 数字遥测。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 436.325,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "69912": {
       "name": "CO-128",
@@ -769,7 +1692,16 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "MARMOTSat，145.875 发 VHF CW 信标。"
+      "blurb": "MARMOTSat，145.875 发 VHF CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 145.875,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     },
     "69920": {
       "name": "MARINA",
@@ -777,23 +1709,17 @@
       "up": 0.0,
       "tone": 0.0,
       "mode": "CW",
-      "blurb": "2026-07 发射，436.680 发 CW 信标。"
-    },
-    "40931": {
-      "name": "LAPAN-A2",
-      "down": 435.88,
-      "up": 145.88,
-      "tone": 88.5,
-      "mode": "FM",
-      "blurb": "印尼 IO-86，FM 转发器 435.880/145.880，88.5 Hz。"
-    },
-    "71922": {
-      "name": "LILIUM-4",
-      "down": 437.85,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "遥测",
-      "blurb": "2026-03 发射的 2U，437.850 发 1k2 AFSK 遥测。"
+      "blurb": "2026-07 发射，436.680 发 CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 436.68,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
     }
-  }
+  },
+  "_allow": "只保留 数据/amateur_allow.json 里的业余卫星；剔除清单见 tools/_dropped_from_source.txt"
 }
