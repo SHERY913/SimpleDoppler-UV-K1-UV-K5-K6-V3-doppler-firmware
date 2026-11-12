@@ -58,3 +58,6 @@ PC工具/多普勒工具/_d3/
 # tools/ 里只有两个生成脚本是源码（allowlist.py / build_amateur_allow.py），
 # 审计转储（_amsat_audit.json 491 KB、_amsat_audit.md 129 KB）是 _amsat_raw 的派生物
 tools/_*
+# 20261112：逆向第三方 APK 的脚本与产物，不进库（文件保留在磁盘）
+reverse/l4s_decompile.py
+reverse/l4s_xref.out
