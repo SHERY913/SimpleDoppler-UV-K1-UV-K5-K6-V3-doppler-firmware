@@ -18,6 +18,8 @@ from datetime import datetime, timezone, timedelta
 
 from sgp4.api import Satrec, jday
 
+from i18n import tr
+
 # ------------------------------------------------------------------ constants
 EARTH_R = 6378.137          # km
 FLAT = 1 / 298.257223563
@@ -168,23 +170,23 @@ class Sat:
 
 CATALOG = [
     Sat(25544, "ISS (ZARYA)", 437.550, "FM / SSTV",
-        "国际空间站。业余无线电业务由 ARISS 组织，舱内有 NA1SS 呼号。"
+        "国际空间站。业余无线电业务由 ARISS 组织，舱内有 NA1SS 呼号。"  # i18n-skip 星简介是数据，英文版数据表另议
         "437.550 MHz 是 SSTV 常用的下行频点，过境时用 PD120 发图。"
         "信号强、过境多，是最适合练手的目标。", tone=""),
     Sat(43017, "AO-91 (Fox-1B)", 145.960, "FM",
-        "AMSAT 的 Fox-1B，2017 年发射。FM 转发器，上行 435.250 MHz（67 Hz 亚音），"
+        "AMSAT 的 Fox-1B，2017 年发射。FM 转发器，上行 435.250 MHz（67 Hz 亚音），"  # i18n-skip 星简介是数据，英文版数据表另议
         "下行 145.960 MHz。天线朝南时最容易在傍晚和凌晨听到。", tone="67.0 Hz"),
     Sat(27607, "SO-50 (SaudiSat-1C)", 436.795, "FM",
-        "2002 年发射的老卫星，至今仍在工作。上行 145.850 MHz（67 Hz 亚音），"
+        "2002 年发射的老卫星，至今仍在工作。上行 145.850 MHz（67 Hz 亚音），"  # i18n-skip 星简介是数据，英文版数据表另议
         "下行 436.795 MHz。需要先发一个亚音唤醒，之后有十分钟窗口。", tone="67.0 Hz"),
     Sat(7530, "AO-7", 145.975, "SSB/CW",
-        "1974 年发射，比很多操作员的年龄都大。模式 A/B 会自己切换，"
+        "1974 年发射，比很多操作员的年龄都大。模式 A/B 会自己切换，"  # i18n-skip 星简介是数据，英文版数据表另议
         "下行 145.975 MHz，是唯一还能用的老古董。"),
     Sat(24278, "FO-29 (JAS-2)", 435.800, "SSB/CW",
-        "日本 JARL 的线性转发器，上行 145.900–146.000 MHz，下行 435.800–435.900 MHz。"
+        "日本 JARL 的线性转发器，上行 145.900–146.000 MHz，下行 435.800–435.900 MHz。"  # i18n-skip 星简介是数据，英文版数据表另议
         "线性转发器能同时通很多人，但需要 SSB 设备和多普勒跟踪。"),
     Sat(44387, "AO-95 / RS-44", 435.610, "SSB/CW",
-        "俄罗斯 RS-44，线性转发器，下行 435.610 MHz。仰角高时信号很扎实。"),
+        "俄罗斯 RS-44，线性转发器，下行 435.610 MHz。仰角高时信号很扎实。"),  # i18n-skip 星简介是数据，英文版数据表另议
 ]
 
 
@@ -254,7 +256,7 @@ def _fetch_celestrak(norad, timeout):
         if line.startswith("1 ") and i + 1 < len(lines) and lines[i + 1].startswith("2 "):
             name = lines[i - 1] if i > 0 else str(norad)
             return name, line, lines[i + 1]
-    raise RuntimeError("TLE 格式不对：" + " / ".join(lines[:3]))
+    raise RuntimeError(tr("TLE 格式不对：{lines}").format(lines=" / ".join(lines[:3])))
 
 
 def _fetch_alt(norad, timeout):
@@ -267,7 +269,7 @@ def _fetch_alt(norad, timeout):
         js = json.loads(r.read().decode("utf-8", "replace"))
     l1, l2 = js.get("line1", ""), js.get("line2", "")
     if not (l1.startswith("1 ") and l2.startswith("2 ")):
-        raise RuntimeError("备用源返回格式不对")
+        raise RuntimeError(tr("备用源返回格式不对"))
     return js.get("name") or str(norad), l1, l2
 
 
@@ -290,7 +292,7 @@ def _curl_text(url, timeout=40):
         with io.open(path, encoding="utf-8", errors="replace") as f:
             out = f.read()
         if not out.strip():
-            raise RuntimeError("curl 拿到空内容")
+            raise RuntimeError(tr("curl 拿到空内容"))
         return out
     finally:
         try:
@@ -336,7 +338,7 @@ def _fetch_bulk(force=False):
             out[norad] = (name, lines[i], lines[i + 1])
 
     if not out:
-        raise RuntimeError("批量 TLE 文件解析不出任何条目")
+        raise RuntimeError(tr("批量 TLE 文件解析不出任何条目"))
 
     _BULK, _BULK_AT = out, time.time()
     return out
@@ -353,14 +355,14 @@ def fetch_tle(norad, timeout=20):
         hit = _fetch_bulk().get(int(norad))
         if hit:
             return hit
-        errors.append("amsat: 文件里没有这颗")
+        errors.append(tr("amsat: 文件里没有这颗"))
     except Exception as e:
         errors.append(f"amsat: {e}")
     try:
         return _fetch_alt(norad, timeout)
     except Exception as e:
         errors.append(f"mirror: {e}")
-    raise RuntimeError("取不到 TLE，三个源都失败 -> " + " | ".join(errors))
+    raise RuntimeError(tr("取不到 TLE，三个源都失败 -> {errs}").format(errs=" | ".join(errors)))
 
 
 def epoch_of(line1):
@@ -606,28 +608,29 @@ def validate_table(table):
     n = len(table)
 
     if n < DPH_HDR:
-        return [f"表只有 {n} 字节，连表头都不够"]
+        return [tr("表只有 {n} 字节，连表头都不够").format(n=n)]
 
     magic, ver, count, hdr_size, data_off, _res = struct.unpack_from(
         "<4sBBHII", table, 0)
 
     if magic != b"DPT1":
-        errs.append(f"表头标识是 {magic!r}，应为 b'DPT1'")
+        errs.append(tr("表头标识是 {magic!r}，应为 b'DPT1'").format(magic=magic))
     if ver != DPH_VERSION:
-        errs.append(f"表格式版本 {ver}，本工具写的是 {DPH_VERSION}")
+        errs.append(tr("表格式版本 {ver}，本工具写的是 {want}").format(ver=ver, want=DPH_VERSION))
     if hdr_size != DPH_HDR:
-        errs.append(f"表头长度 {hdr_size}，应为 {DPH_HDR}")
+        errs.append(tr("表头长度 {got}，应为 {want}").format(got=hdr_size, want=DPH_HDR))
     if not (1 <= count <= DPH_PASS_MAX):
-        errs.append(f"条目数 {count}，必须在 1~{DPH_PASS_MAX} 之间")
+        errs.append(tr("条目数 {count}，必须在 1~{m} 之间").format(count=count, m=DPH_PASS_MAX))
         return errs
 
     if data_off != TABLE_START + DPH_SAMPLE_OFF:
-        errs.append(f"样点区起点 0x{data_off:06X}，"
-                    f"应为 0x{TABLE_START + DPH_SAMPLE_OFF:06X}")
+        errs.append(tr("样点区起点 0x{got:06X}，应为 0x{want:06X}").format(
+            got=data_off, want=TABLE_START + DPH_SAMPLE_OFF))
 
     need = DPH_HDR + count * DPH_ENTRY
     if n < need:
-        errs.append(f"长度 {n} 字节装不下 {count} 条条目（需要 {need}）")
+        errs.append(tr("长度 {n} 字节装不下 {count} 条条目（需要 {need}）").format(
+            n=n, count=count, need=need))
         return errs
 
     for i in range(count):
@@ -635,39 +638,43 @@ def validate_table(table):
         (name, f10, doff, up10, aos2, dur, pts, step, ctc, flags,
          el) = struct.unpack_from("<16sIIIHHHHHBB", table, off)
 
-        tag = f"第 {i + 1} 条"
+        tag = tr("第 {n} 条").format(n=i + 1)
         if not name.strip(b"\x00 "):
-            errs.append(f"{tag}：卫星名是空的")
+            errs.append(tr("{tag}：卫星名是空的").format(tag=tag))
         if not (1_000_000 <= f10 <= 1_000_000_000):
-            errs.append(f"{tag}：下行频率 {f10} 超出范围")
+            errs.append(tr("{tag}：下行频率 {f10} 超出范围").format(tag=tag, f10=f10))
         if up10 and not (1_000_000 <= up10 <= 1_000_000_000):
-            errs.append(f"{tag}：上行频率 {up10} 超出范围")
+            errs.append(tr("{tag}：上行频率 {up10} 超出范围").format(tag=tag, up10=up10))
         # 固件上限是 DPH_DUR_S_MAX（1500 s）：原来那个 7200 是按 496 KiB 表区
         # 算出来的"防坏线"，32 KiB 里装不下，所以三端一起收到 1500（25 分钟）。
         # 437.8 MHz 上最长的过境也就 660 s 上下，1500 s 有两倍余量。
         if not (10 <= dur <= DPH_DUR_S_MAX):
-            errs.append(f"{tag}：时长 {dur} 秒不合理（固件允许 10~{DPH_DUR_S_MAX}）")
+            errs.append(tr("{tag}：时长 {dur} 秒不合理（固件允许 10~{m}）").format(
+                tag=tag, dur=dur, m=DPH_DUR_S_MAX))
         if not (2 <= pts <= 20000):
-            errs.append(f"{tag}：采样点 {pts} 个不合理")
+            errs.append(tr("{tag}：采样点 {pts} 个不合理").format(tag=tag, pts=pts))
             continue
         # 上界只受 u16 限制；装不装得下由下面的样点越界检查算。原来这里把
         # 下限 10000 顺手写成了上界，等价于"只允许恰好 10 s"，而 build_table
         # 允许到 65535 —— 于是"构表成功、写表被自己拒"，报错文案还说"要求 ≥"。
         if not (DPH_STEP_MS_MIN <= step <= 65535):
-            errs.append(f"{tag}：采样间隔 {step} 毫秒不合理"
-                        f"（固件要求 {DPH_STEP_MS_MIN}~65535 ms，即 "
-                        f"{DPH_STEP_MS_MIN / 1000:g}~65.535 s）")
+            errs.append(tr("{tag}：采样间隔 {step} 毫秒不合理"
+                           "（固件要求 {minms}~65535 ms，即 "
+                           "{mins:g}~65.535 s）").format(
+                tag=tag, step=step, minms=DPH_STEP_MS_MIN,
+                mins=DPH_STEP_MS_MIN / 1000))
         if el > 90:
-            errs.append(f"{tag}：最高仰角 {el}° 不合理")
+            errs.append(tr("{tag}：最高仰角 {el}° 不合理").format(tag=tag, el=el))
 
         body = pts * 6  # int16 offset + u8 elev + u16 range + i8 rate
         if doff < TABLE_START + DPH_SAMPLE_OFF:
-            errs.append(f"{tag}：样点地址 0x{doff:06X} 落在表头/条目区")
+            errs.append(tr("{tag}：样点地址 0x{doff:06X} 落在表头/条目区").format(tag=tag, doff=doff))
         elif doff + body > TABLE_START + DPH_REGION:
-            errs.append(f"{tag}：样点越界，"
-                        f"结束于 0x{doff + body:06X}")
+            errs.append(tr("{tag}：样点越界，"
+                           "结束于 0x{end:06X}").format(tag=tag, end=doff + body))
         elif n < (doff - TABLE_START) + body:
-            errs.append(f"{tag}：样点没写全（需要到第 {doff - TABLE_START + body} 字节）")
+            errs.append(tr("{tag}：样点没写全（需要到第 {need} 字节）").format(
+                tag=tag, need=doff - TABLE_START + body))
 
     return errs
 
@@ -694,8 +701,8 @@ def validate_warnings(table):
             f = struct.unpack_from("<16sIIIHHHHHBB", table, off)
             dur = f[5]
             if dur > 4290:
-                out.append(f"第 {i + 1} 条时长 {dur} s 超过 4290 s，"
-                           "固件插值会溢出，曲线尾部失真")
+                out.append(tr("第 {i} 条时长 {dur} s 超过 4290 s，"
+                              "固件插值会溢出，曲线尾部失真").format(i=i + 1, dur=dur))
     except struct.error:
         pass
     return out
@@ -726,17 +733,18 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
         tz_hours = local_tz_hours()
 
     if not passes:
-        raise ValueError("没有过境可写")
+        raise ValueError(tr("没有过境可写"))
 
     # 固件会拒收比 DPH_STEP_MS_MIN 更密的表（DPH_LoadEntry 的闸门），
     # 在这里先拦住，而不是写进去让电台整表读不出来。
     step_ms = int(round(step_s * 1000))
     if step_ms < DPH_STEP_MS_MIN:
-        raise ValueError(
-            f"采样间隔 {step_s:g} s 太密：固件要求 ≥ {DPH_STEP_MS_MIN / 1000:g} s"
-            f"（表区只有 {DPH_REGION // 1024} KiB，密采样装不下几条过境）")
+        raise ValueError(tr(
+            "采样间隔 {s:g} s 太密：固件要求 ≥ {m:g} s"
+            "（表区只有 {k} KiB，密采样装不下几条过境）").format(
+            s=step_s, m=DPH_STEP_MS_MIN / 1000, k=DPH_REGION // 1024))
     if step_ms > 65535:
-        raise ValueError(f"采样间隔 {step_s:g} s 超出 u16 的 step_ms 范围")
+        raise ValueError(tr("采样间隔 {s:g} s 超出 u16 的 step_ms 范围").format(s=step_s))
 
     entries = []
     blob = bytearray()
@@ -752,27 +760,32 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
         # 超过 DPH_DUR_S_MAX 的"过境"一定是算错了（固件也按同一个数拒收），
         # 而且它会把一条条目的样点数顶穿容量断言。
         if p.duration > DPH_DUR_S_MAX:
-            raise ValueError(
-                f"{getattr(p, 'name', name)} 的过境时长 {p.duration} s 超过 "
-                f"{DPH_DUR_S_MAX} s；检查 TLE 与地面站坐标")
+            raise ValueError(tr(
+                "{name} 的过境时长 {dur} s 超过 "
+                "{m} s；检查 TLE 与地面站坐标").format(
+                name=getattr(p, 'name', name), dur=p.duration, m=DPH_DUR_S_MAX))
 
         # 本地日偏移只有 4 bit（见 DPH_DAY_MAX）。这里以前直接 `& 0x0F`，
         # 第 16 天那趟被折成"今天"写进表里，构表和校验双双放行。
         day_idx = ((p.aos + timedelta(hours=tz_hours)).date() - base.date()).days
         if day_idx < 0:
-            raise ValueError(
-                f"第 {len(entries) + 1} 趟（{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M} "
-                f"本地）比表头那一天（{base:%m-%d}）还早。条目只能表达"
-                f"表头之后的第几天，倒着排电台会读出完全错误的日期。"
-                f"过境必须按时间从早到晚排。")
+            raise ValueError(tr(
+                "第 {n} 趟（{aos} 本地）比表头那一天（{bday}）还早。条目只能表达"
+                "表头之后的第几天，倒着排电台会读出完全错误的日期。"
+                "过境必须按时间从早到晚排。").format(
+                n=len(entries) + 1,
+                aos=f"{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M}",
+                bday=f"{base:%m-%d}"))
         if day_idx > DPH_DAY_MAX:
-            raise ValueError(
-                f"第 {len(entries) + 1} 趟（{getattr(p, 'name', name)}，"
-                f"{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M} 本地）已经在"
-                f"表头那一天之后 {day_idx} 天了，而条目里的"
-                f"日期偏移只有 4 bit，最多表达 {DPH_DAY_MAX} 天 —— 再往后会被折回"
-                f"成第 0 天，电台上显示的日期和倒计时都是错的。"
-                f"把天数收窄，或者先写掉前面这批再写后面那批。")
+            raise ValueError(tr(
+                "第 {n} 趟（{name}，{aos} 本地）已经在"
+                "表头那一天之后 {d} 天了，而条目里的"
+                "日期偏移只有 4 bit，最多表达 {m} 天 —— 再往后会被折回"
+                "成第 0 天，电台上显示的日期和倒计时都是错的。"
+                "把天数收窄，或者先写掉前面这批再写后面那批。").format(
+                n=len(entries) + 1, name=getattr(p, 'name', name),
+                aos=f"{(p.aos + timedelta(hours=tz_hours)):%m-%d %H:%M}",
+                d=day_idx, m=DPH_DAY_MAX))
 
         entries.append(struct.pack(
             "<16sIIIHHHHHBB",
@@ -796,9 +809,9 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
         for (_, off, el, rng, rate) in p.samples:
             off = int(round(off))
             if off < -32768 or off > 32767:
-                raise ValueError(
-                    f"多普勒偏移 {off} Hz 超出 int16 范围（±32767）："
-                    f"这颗星的下行频率或采样范围不适合这张表")
+                raise ValueError(tr(
+                    "多普勒偏移 {off} Hz 超出 int16 范围（±32767）："
+                    "这颗星的下行频率或采样范围不适合这张表").format(off=off))
             blob += struct.pack("<hBHb", off, max(0, min(255, int(el))),
                                 max(0, min(65535, int(rng))),
                                 max(-128, min(127, int(rate))))
@@ -807,26 +820,29 @@ def build_table(passes, freq10, step_s, tz_hours=None, name="SAT",
     # 版本号只能用常量：这里以前写死 5，改 DPH_VERSION 时两边不一致，
     # 写出来的是"头 ver=5 + 新排版条目"，固件按旧格式解析 → 整表错位。
     if len(entries) > DPH_PASS_MAX:
-        raise ValueError(
-            f"过境条目 {len(entries)} 条，超过 {DPH_PASS_MAX} 条 —— 这是条目区的"
-            f"物理上限（{DPH_HDR} B 表头 + {DPH_PASS_MAX}×{DPH_ENTRY} B 条目 = "
-            f"0x{DPH_SAMPLE_OFF:X}），再多一条就压进样点区了。少选几趟。")
+        raise ValueError(tr(
+            "过境条目 {n} 条，超过 {m} 条 —— 这是条目区的"
+            "物理上限（{hdr} B 表头 + {m}×{ent} B 条目 = "
+            "0x{off:X}），再多一条就压进样点区了。少选几趟。").format(
+            n=len(entries), m=DPH_PASS_MAX, hdr=DPH_HDR,
+            ent=DPH_ENTRY, off=DPH_SAMPLE_OFF))
     header = struct.pack("<4sBBHII", b"DPT1", DPH_VERSION, len(entries), DPH_HDR,
                          DPH_BASE + DPH_SAMPLE_OFF, hdr_date)
 
     out = bytearray(header) + b"".join(entries)
     if len(out) > DPH_SAMPLE_OFF:
-        raise ValueError(f"条目太多，超出 {DPH_SAMPLE_OFF} 字节的头部空间")
+        raise ValueError(tr("条目太多，超出 {n} 字节的头部空间").format(n=DPH_SAMPLE_OFF))
     out += bytes(DPH_SAMPLE_OFF - len(out))
     out += blob
 
     if len(out) > DPH_REGION:
         over = len(out) - DPH_REGION
         one = DPH_ENTRY + len(getattr(passes[-1], "samples", [])) * DPH_PT
-        raise ValueError(
-            f"表格 {len(out):,} B，超过表区 {DPH_REGION:,} B"
-            f"（{DPH_REGION // 1024} KiB）{over:,} B。少选 1 趟大约能省 {one:,} B；"
-            f"或者把采样间隔调大（10 s 的表只有 5 s 的一半）、把天数/仰角收窄。")
+        raise ValueError(tr(
+            "表格 {n:,} B，超过表区 {cap:,} B"
+            "（{k} KiB）{over:,} B。少选 1 趟大约能省 {one:,} B；"
+            "或者把采样间隔调大（10 s 的表只有 5 s 的一半）、把天数/仰角收窄。").format(
+            n=len(out), cap=DPH_REGION, k=DPH_REGION // 1024, over=over, one=one))
     return bytes(out)
 
 
@@ -920,13 +936,14 @@ def table_sectors(size):
 def guard(addr, length):
     """Refuse to touch anything outside the table region."""
     if addr < TABLE_START or addr + length > TABLE_END:
-        raise ValueError(
-            f"拒绝写入：0x{addr:06X}+{length} 超出表格区 "
-            f"0x{TABLE_START:06X}..0x{TABLE_END:06X}")
+        raise ValueError(tr(
+            "拒绝写入：0x{addr:06X}+{length} 超出表格区 "
+            "0x{lo:06X}..0x{hi:06X}").format(addr=addr, length=length,
+                                             lo=TABLE_START, hi=TABLE_END))
     for (lo, ln) in (FLASH_FIRMWARE, FLASH_APP_SLOTS,
                      FLASH_VOICE_HEAD, FLASH_VOICE_TAIL):
         if addr < lo + ln and addr + length > lo:
-            raise ValueError(f"拒绝写入：与固件/APP/语音包区 0x{lo:06X} 重叠")
+            raise ValueError(tr("拒绝写入：与固件/APP/语音包区 0x{lo:06X} 重叠").format(lo=lo))
     return addr
 
 
@@ -956,7 +973,7 @@ SECTOR_FOREIGN = "foreign"    # 既不是空白也不是我们的表
 def classify_sector(buf, addr):
     """Classify one 4 KiB sector. Mirrors DPH_ClassifySector() in the firmware."""
     if len(buf) != DPH_SECTOR:
-        raise ValueError(f"扇区长度 {len(buf)}，应为 {DPH_SECTOR}")
+        raise ValueError(tr("扇区长度 {n}，应为 {want}").format(n=len(buf), want=DPH_SECTOR))
     if addr == DPH_BASE and buf[:4] == b"DPT1":
         return SECTOR_OURS
     return SECTOR_BLANK if buf.count(0xFF) == len(buf) else SECTOR_FOREIGN
@@ -966,7 +983,7 @@ def classify_region(blob):
     """[(addr, class), ...] for the whole table region."""
     n = DPH_REGION // DPH_SECTOR
     if len(blob) != DPH_REGION:
-        raise ValueError(f"表区回读 {len(blob)} 字节，应为 {DPH_REGION}")
+        raise ValueError(tr("表区回读 {n} 字节，应为 {want}").format(n=len(blob), want=DPH_REGION))
     return [(DPH_BASE + i * DPH_SECTOR,
              classify_sector(blob[i * DPH_SECTOR:(i + 1) * DPH_SECTOR],
                              DPH_BASE + i * DPH_SECTOR))
@@ -984,12 +1001,12 @@ def occupied_reason(classes):
     if head == SECTOR_OURS:
         return None
     if head == SECTOR_FOREIGN:
-        return (f"0x{DPH_BASE:06X} 现在不是多普勒表，是被别的东西占着的"
-                f"（可能是汉化语音包 / Sonic 镜像 / 别人的固件数据）。"
-                f"这里一擦就不可恢复，所以没有动它一个字节。")
+        return tr("0x{addr:06X} 现在不是多普勒表，是被别的东西占着的"
+                  "（可能是汉化语音包 / Sonic 镜像 / 别人的固件数据）。"
+                  "这里一擦就不可恢复，所以没有动它一个字节。").format(addr=DPH_BASE)
     for addr, cls in classes[1:]:
         if cls == SECTOR_FOREIGN:
-            return (f"表头扇区是空的，但 0x{addr:06X} 里有数据 —— 说明这块地"
-                    f"被别的东西切走了一部分，不能整块擦。"
-                    f"没有动它一个字节。")
+            return tr("表头扇区是空的，但 0x{addr:06X} 里有数据 —— 说明这块地"
+                      "被别的东西切走了一部分，不能整块擦。"
+                      "没有动它一个字节。").format(addr=addr)
     return None

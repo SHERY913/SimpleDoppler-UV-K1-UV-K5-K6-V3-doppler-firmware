@@ -40,6 +40,11 @@ cd 多普勒/固件源码/uvk1-v6.3.0 && PATH=<workspace>/tc/root/mingw64/bin:$P
   PYTHONIOENCODING=utf-8 python .gfw.py
 # 回归（离线六层；后三层要电台/MuMu）
 cd 多普勒/PC工具/多普勒工具 && bash verify_all.sh --fast
+# 双语守门（verify_all 第 13 层单独跑也行）：中文字面量必须走 tr()、lang_en.json
+# 键全、译文无中文、占位符中英一致。切换入口：工具左栏「EN/中」按钮，代码里
+# i18n.set_language('en')；cfg["lang"] 持久化。星简介/中文星名是数据，英文模式
+# 星名自动用国际名，简介暂留中文（数据表翻译另议）。
+python 多普勒/PC工具/多普勒工具/verify_i18n.py
 # 假电台仿真（不需要硬件，不改固件源码）：m0 空表 / s1 预听松手 / s2 就绪松手
 #   / s3 功率还原 / s4 整趟 600 s / s1h 长按 M 进预听 / s5 侧键一起发 / s6 纯接收星侧键二
 #   / s7 ▲▼ 改步进 / s8 预听·尾音页 TX 频率 / all（all 先跑两个静态守卫再跑全部场景）

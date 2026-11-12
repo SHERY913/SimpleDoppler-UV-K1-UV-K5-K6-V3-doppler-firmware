@@ -1,71 +1,86 @@
 # doppler_tool.py 用户可见文案清单（dump_ui_strings.py 生成）
-# 共 68 条；格式：行号 | 位置 | 原文
+# 共 83 条；格式：行号 | 位置 | 原文
 
-551 | log_line | f"{port} proto={proto} state={state} phase={phase}{notes['fw']} 表={len(table)}B 擦={len(sectors)}扇区"
-556 | log_line | f"len={st['len']} sectors={st['sectors']} entries={st['count']} pts={st['pts']} step_ms={st['step_ms']} data_off=0x{st['data_off']:06X}"
-563 | log_line | f"len=0x{core.DPH_SAMPLE_OFF:X}+6×{st['pts']}={st['len']} entry_area=16+40×{st['count']}={st['entry_area']} pad={core.DPH_SAMPLE_OFF - st['entry_area']}"
-595 | log_line | f'token=0x{token:08X} credits={credits} 表区将被清空后重写'
-597 | log_line | ' '.join((f'0x{a:06X}:{c}' for a, c in classes))
-651 | log_line | f'整表回读不符 @0x{core.TABLE_START + bad[0]:06X}（设备 0x{bad[1]:02X}），第 {attempt} 遍重写'
-655 | log_line | f"写入完成 {len(table)}B / 擦 {len(sectors)} 扇区{notes['fw']}"
-669 | title | f'{APP_NAME} · 写表'
-765 | Label.text | 卫星
-773 | Button.text | 更新 TLE
-785 | Label.text | f'时区 {tz_label()}'
-836 | Button.text | ★ 收藏
-896 | Label.text | 筛选
-909 | Button.text | 只看勾选
-935 | Label.text | 点表头排序
-959 | Label.text | 纬度
-962 | Label.text | 经度
-966 | Label.text | 天数
-969 | Label.text | 仰角°
-972 | Label.text | 间隔s
-976 | Button.text | 计算
-988 | Button.text | 端口
-995 | Button.text | ＋ 待写
-1000 | Button.text | 清空
-1011 | Checkbutton.text | 允许擦除表区
-1018 | Button.text | 写入电台
-1115 | config.text | 载入…
-1117 | config.text | '联网刷新 TLE…' if force else '载入 TLE…'
-1233 | config.text | 载入…
-1238 | config.text | 离线
-1239 | config.text | 取失败
-1241 | config.text | f'卫星表失败：{err}'
-1263 | config.text | f'{len(self.sats)} 颗 未设台站'
-1296 | config.text | f'{len(sats)} 颗'
-1302 | config.text | f'离线 · 缓存 {len(sats)} 颗 · {age_label(self.tle_at)}'
-1305 | config.text | f'缓存 {len(sats)} 颗 · {age_label(self.tle_at)}'
-1309 | config.text | f'已更新 · {len(sats)} 颗 · {when}'
-1311 | config.text | f'已更新 · {len(sats)} 颗'
-1439 | config.text | f'{s.freq_mhz:.4f} MHz' if s.known else '频率未知'
-1444 | config.text | f'上行 {up:.3f} MHz{t}'
-1446 | config.text | f'哑音 {s.tone}' if s.tone else ''
-1454 | config.text | s.blurb or '业余卫星'
-1499 | messagebox.showerror | 台站 | 先填经纬度（十进制度，如 31.2304 / 121.4737，西经南纬填负数）
-1503 | messagebox.showerror | 参数 | 经纬度/天数/仰角/间隔 填数字
-1506 | messagebox.showerror | 参数 | 纬度 -90..90，经度 -180..180
-1509 | messagebox.showerror | 参数 | f'间隔最小 {core.DPH_STEP_MS_MIN // 1000} 秒'
-1513 | messagebox.showerror | 参数 | 天数 1..10
-1534 | config.text | 计算中…
-1626 | config.text | f'{len(ps)} 个过境 · {hot} 个 60°+'
-1695 | messagebox.showerror | 待写 | 先勾选过境
-1721 | config.text | f'待写 {len(self.queue)} 段：{parts}'
-1729 | messagebox.showerror | 频率 | 无下行频率：sat_freq.py 里补
-1732 | messagebox.showerror | 串口 | 没装 pyserial：pip install pyserial
-1736 | messagebox.showerror | 串口 | 先选串口
-1740 | messagebox.showerror | 过境 | 没勾选过境
-1750 | messagebox.showerror | 过境 | f'超过 {core.DPH_PASS_MAX} 条：条目区只放 {core.DPH_PASS_MAX} 条'
-1768 | messagebox.askyesno | 表格超了 | msg
-1776 | config.text | f'去掉 {len(drop)} 趟 · {len(sel)} 趟 {core.table_used(sel):,} B'
-1780 | messagebox.showerror | 过境 | 一趟都装不下：调大间隔
-1805 | messagebox.showwarning | 采样间隔 | 过境不是同一次算的，先点「计算」
-1813 | messagebox.showerror | 表格 | f'{type(e).__name__}: {e}'
-1832 | messagebox.showerror | 表格 | f'地址自检失败，未写入：{e}'
-1852 | messagebox.askyesno | 写入电台 · 确认 | msg
-1853 | config.text | 已取消
-1873 | config.text | f"✓ 完成 · {st['len']} 字节 · {st['sectors']} 扇区{notes.get('fw', '')}"
-1878 | log_line | msg.replace(chr(10), ' / ')
-1893 | log_line | f"{APP_NAME} v{APP_VERSION} BG0FPJ · F4HWN SSTV · 打包={getattr(sys, 'frozen', False)} · py={sys.version.split()[0]} · 数据目录={DATA_DIR}"
-1901 | log_line | traceback.format_exc()
+565 | log_line | tr('{port} proto={proto} state={state} phase={phase}{fw} 表={tb}B 擦={s}扇区').format(port=port, proto=proto, state=state, phase=phase, fw=notes['fw'], tb=len(table), s=len(sectors))
+571 | log_line | f"len={st['len']} sectors={st['sectors']} entries={st['count']} pts={st['pts']} step_ms={st['step_ms']} data_off=0x{st['data_off']:06X}"
+578 | log_line | f"len=0x{core.DPH_SAMPLE_OFF:X}+6×{st['pts']}={st['len']} entry_area=16+40×{st['count']}={st['entry_area']} pad={core.DPH_SAMPLE_OFF - st['entry_area']}"
+610 | log_line | tr('token=0x{tok:08X} credits={c} 表区将被清空后重写').format(tok=token, c=credits)
+612 | log_line | ' '.join((f'0x{a:06X}:{c}' for a, c in classes))
+668 | log_line | tr('整表回读不符 @0x{addr:06X}（设备 0x{dev:02X}），第 {n} 遍重写').format(addr=core.TABLE_START + bad[0], dev=bad[1], n=attempt)
+672 | log_line | tr('写入完成 {n}B / 擦 {s} 扇区{fw}').format(n=len(table), s=len(sectors), fw=notes['fw'])
+690 | title | tr('{app} · 写表').format(app=tr(APP_NAME))
+784 | title | tr('{app} · 写表').format(app=tr(APP_NAME))
+787 | config.text | '中' if code == 'zh' else 'EN'
+837 | Button.text | '中' if i18n.get_language() == 'zh' else 'EN'
+845 | Label.text | 卫星
+853 | Button.text | 更新 TLE
+858 | config.text | tr('更新 TLE')
+869 | config.text | tr('时区 {tz}').format(tz=tz_label())
+923 | Button.text | ★ 收藏
+971 | Label.text | 转发器
+981 | Label.text | 下行 MHz（标称）
+987 | Label.text | 上行 MHz（空=仅接收）
+993 | Label.text | AOS 时刻的值
+1015 | Label.text | 筛选
+1029 | Button.text | 只看勾选
+1034 | config.text | tr('只看勾选')
+1056 | Label.text | 点表头排序
+1059 | config.text | tr('点表头排序')
+1081 | Label.text | 纬度
+1084 | Label.text | 经度
+1088 | Label.text | 天数
+1091 | Label.text | 仰角°
+1094 | Label.text | 间隔s
+1098 | Button.text | 计算
+1110 | Button.text | 端口
+1117 | Button.text | ＋ 待写
+1120 | config.text | tr('＋ 待写')
+1123 | Button.text | 清空
+1126 | config.text | tr('清空')
+1135 | Checkbutton.text | 允许擦除表区
+1140 | config.text | tr('允许擦除表区')
+1143 | Button.text | 写入电台
+1147 | config.text | tr('写入电台')
+1241 | config.text | tr('载入…')
+1243 | config.text | tr('联网刷新 TLE…') if force else tr('载入 TLE…')
+1359 | config.text | tr('载入…')
+1364 | config.text | tr('离线')
+1365 | config.text | tr('取失败')
+1367 | config.text | tr('卫星表失败：{err}').format(err=err)
+1389 | config.text | tr('{n} 颗 未设台站').format(n=len(self.sats))
+1422 | config.text | tr('{n} 颗').format(n=len(sats))
+1428 | config.text | tr('离线 · 缓存 {n} 颗 · {age}').format(n=len(sats), age=age_label(self.tle_at))
+1431 | config.text | tr('缓存 {n} 颗 · {age}').format(n=len(sats), age=age_label(self.tle_at))
+1435 | config.text | tr('已更新 · {n} 颗 · {when}').format(n=len(sats), when=when)
+1438 | config.text | tr('已更新 · {n} 颗').format(n=len(sats))
+1586 | config.text | tr(s.blurb or '业余卫星')
+1668 | config.text | tr('频率未知')
+1681 | config.text | tr('上行 {m} MHz{t}').format(m=f'{tr0.up_mhz:.4f}', t=t)
+1683 | config.text | tr('哑音 {t} Hz').format(t=f'{tr0.tone_hz:g}') if tr0.tone_hz else ''
+1739 | messagebox.showerror | tr('台站') | tr('先填经纬度（十进制度，如 31.2304 / 121.4737，西经南纬填负数）')
+1743 | messagebox.showerror | tr('参数') | tr('经纬度/天数/仰角/间隔 填数字')
+1746 | messagebox.showerror | tr('参数') | tr('纬度 -90..90，经度 -180..180')
+1749 | messagebox.showerror | tr('参数') | tr('间隔最小 {n} 秒').format(n=core.DPH_STEP_MS_MIN // 1000)
+1753 | messagebox.showerror | tr('参数') | tr('天数 1..10')
+1779 | config.text | tr('计算中…')
+1876 | config.text | tr('{n} 个过境 · {hot} 个 60°+').format(n=len(ps), hot=hot)
+1957 | messagebox.showerror | tr('待写') | tr('先勾选过境')
+1991 | config.text | tr('待写 {n} 段：{parts}').format(n=len(self.queue), parts=parts)
+1999 | messagebox.showerror | tr('频率') | tr('无下行频率：sat_freq.py 里补')
+2002 | messagebox.showerror | tr('串口') | tr('没装 pyserial：pip install pyserial')
+2006 | messagebox.showerror | tr('串口') | tr('先选串口')
+2010 | messagebox.showerror | tr('过境') | tr('没勾选过境')
+2020 | messagebox.showerror | tr('过境') | tr('超过 {m} 条：条目区只放 {m} 条').format(m=core.DPH_PASS_MAX)
+2038 | messagebox.askyesno | tr('表格超了') | msg
+2046 | config.text | tr('去掉 {d} 趟 · {s} 趟 {b} B').format(d=len(drop), s=len(sel), b=f'{core.table_used(sel):,}')
+2050 | messagebox.showerror | tr('过境') | tr('一趟都装不下：调大间隔')
+2082 | messagebox.showwarning | tr('采样间隔') | tr('过境不是同一次算的，先点「计算」')
+2091 | messagebox.showerror | tr('表格') | f'{type(e).__name__}: {e}'
+2110 | messagebox.showerror | tr('表格') | tr('地址自检失败，未写入：{e}').format(e=e)
+2138 | messagebox.askyesno | tr('写入电台 · 确认') | msg
+2139 | config.text | tr('已取消')
+2159 | config.text | tr('✓ 完成 · {n} 字节 · {s} 扇区{fw}').format(n=st['len'], s=st['sectors'], fw=notes.get('fw', ''))
+2164 | log_line | msg.replace(chr(10), ' / ')
+2179 | log_line | tr('{app} v{v} BG0FPJ · F4HWN SSTV · 打包={frozen} · py={py} · 数据目录={dir}').format(app=tr(APP_NAME), v=APP_VERSION, frozen=getattr(sys, 'frozen', False), py=sys.version.split()[0], dir=DATA_DIR)
+2190 | log_line | tr('AppUserModelID 设置失败：{e}').format(e=e)
+2196 | log_line | traceback.format_exc()

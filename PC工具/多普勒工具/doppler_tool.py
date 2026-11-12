@@ -19,7 +19,9 @@ from datetime import datetime, timezone, timedelta
 from tkinter import ttk, messagebox
 
 import doppler_core as core
+import i18n
 import radio_proto
+from i18n import tr
 
 # ---------------------------------------------------------------- 路径的唯一出处
 # 源码运行和打包成 exe 运行，"程序在哪"和"用户数据该写哪"是两回事：
@@ -67,8 +69,10 @@ BAD = "#5a2a2a"       # 输入框标红：框里的数给不出可用频率
 # 索引 == len(transponders) 时选中就是它（见 sel_trans）。
 CUSTOM_TRANS_LABEL = sat_freq.CUSTOM_TRANS_LABEL
 
-# 时区不再在这里写死 +8：界面、表头、对时统一走 core.local_tz_hours()，
-# 见下面的 local() / tz_label()（修 U-P-19）。
+# 时区唯一真值：手动填写 > 系统时区（系统时区自带各国政策与夏令时）。
+# 界面显示、表头 aos2、对时推的钟，三处都走 Tool._tz_hours()。
+# 历史：最早写死 +8（U-P-19）→ 系统时区 → 短暂试过纯经度太阳时（不认政策，
+# 新疆会显示成 UTC+6），最终定稿"系统 + 可手动覆盖"。
 
 
 # ------------------------------------------------------------------ radio link
@@ -166,7 +170,7 @@ class Link:
             if chunk:
                 self.buf += chunk
         if len(self.buf) < n:
-            raise TimeoutError("电台没有响应")
+            raise TimeoutError(tr("电台没有响应"))
         out = bytes(self.buf[:n])
         del self.buf[:n]
         return out
@@ -208,7 +212,7 @@ class Link:
         try:
             hdr = self._read(4, deadline)
             if hdr[0:2] != bytes([0xAB, 0xCD]):
-                raise RuntimeError(f"回包头不对: {hdr.hex()}")
+                raise RuntimeError(tr("回包头不对: {h}").format(h=hdr.hex()))
             n = hdr[2] | (hdr[3] << 8)          # body 长度 = 内层 msg 长度
             # 掩码覆盖 msg + CRC(2)，脚标 DC BA 不在掩码内 —— 这就是以前
             # "读 n 再读 4 字节脚标"为什么字节数没错、却永远校验不了 CRC 的原因。
@@ -216,24 +220,23 @@ class Link:
             body, crc_rx = raw[:n], raw[n] | (raw[n + 1] << 8)
             foot = self._read(2, deadline)
             if foot != bytes([0xDC, 0xBA]):
-                raise RuntimeError(f"回包脚标不对: {foot.hex()}")
+                raise RuntimeError(tr("回包脚标不对: {f}").format(f=foot.hex()))
             if n < 4:
-                raise RuntimeError(f"回包 body 太短: {n} 字节 {body.hex()}")
+                raise RuntimeError(tr("回包 body 太短: {n} 字节 {b}").format(n=n, b=body.hex()))
             rid = body[0] | (body[1] << 8)
             if rid != ((cmd + 1) & 0xFFFF):
-                raise RuntimeError(
-                    f"回包 ID 0x{rid:04X} 不是 0x{(cmd + 1) & 0xFFFF:04X}"
-                    f"（发的 0x{cmd:04X}）body={body.hex()}"
-                )
+                raise RuntimeError(tr(
+                    "回包 ID 0x{rid:04X} 不是 0x{want:04X}（发的 0x{cmd:04X}）body={body}"
+                ).format(rid=rid, want=(cmd + 1) & 0xFFFF, cmd=cmd, body=body.hex()))
             paylen = body[2] | (body[3] << 8)
             if 4 + paylen > n:
-                raise RuntimeError(
-                    f"回包 paylen={paylen} 与 body 长度 {n} 矛盾 body={body.hex()}"
-                )
+                raise RuntimeError(tr(
+                    "回包 paylen={paylen} 与 body 长度 {n} 矛盾 body={body}"
+                ).format(paylen=paylen, n=n, body=body.hex()))
             if crc_rx != 0xFFFF and crc_rx != crc16(body):
-                raise RuntimeError(
-                    f"回包 CRC 不符 收 0x{crc_rx:04X} 算 0x{crc16(body):04X}"
-                )
+                raise RuntimeError(tr(
+                    "回包 CRC 不符 收 0x{rx:04X} 算 0x{calc:04X}"
+                ).format(rx=crc_rx, calc=crc16(body)))
             if n != expect:
                 # 0x0764 的"拒绝"回包：固件回 11 字节（ID 2 + Size 2 +
                 # Addr 4 + Size=0 + Status=1），Status=1 表示它不认这个地址
@@ -245,16 +248,16 @@ class Link:
                 if cmd == 0x0764 and n == 11 and body[10]:
                     raddr = struct.unpack("<I", body[4:8])[0]
                     rst = body[10]
-                    raise RuntimeError(
-                        f"电台拒读 0x{raddr:06X}（Status={rst}，回包 Size=0）："
-                        f"这个地址不在电台认识的表区里。多半是电台固件还是旧版"
-                        f"（表区 32 KiB，止于 0x16A000），先用 104,288 B / "
-                        f"md5 b48ffb57 那个 f4hwn.sstv.doppler.bin 刷新固件再写表。"
-                    )
+                    raise RuntimeError(tr(
+                        "电台拒读 0x{addr:06X}（Status={st}，回包 Size=0）："
+                        "这个地址不在电台认识的表区里。多半是电台固件还是旧版"
+                        "（表区 32 KiB，止于 0x16A000），先用 104,288 B / "
+                        "md5 b48ffb57 那个 f4hwn.sstv.doppler.bin 刷新固件再写表。"
+                    ).format(addr=raddr, st=rst))
                 # 只在"比预期短"时算错：固件若多给字段（向前兼容）不该判失败。
-                raise RuntimeError(
-                    f"回包长度 {n} 少于预期 {expect}（0x{cmd:04X}）body={body.hex()}"
-                )
+                raise RuntimeError(tr(
+                    "回包长度 {n} 少于预期 {want}（0x{cmd:04X}）body={body}"
+                ).format(n=n, want=expect, cmd=cmd, body=body.hex()))
             return body
         except Exception:
             # A late or partial reply must never be parsed as the next one.
@@ -301,7 +304,7 @@ class Link:
     def erase(self, addr):
         r = self.ask(0x0760, struct.pack("<I", addr), 9)      # Addr(4)+Status(1) -> body 9
         if r[8]:
-            raise RuntimeError(f"擦除失败 0x{addr:06X} code={r[8]}")
+            raise RuntimeError(tr("擦除失败 0x{addr:06X} code={code}").format(addr=addr, code=r[8]))
         time.sleep(0.06)                 # sector erase needs ~50 ms internally
 
     def write(self, addr, data):
@@ -324,7 +327,7 @@ class Link:
                     # 体长、不看状态字节，写失败只能靠"最后回读不符"暴露，现场
                     # 看到的是"地址对不上"而不是"这块没写进去"（报告 第六部分·回归项 13）。
                     if len(r) > 10 and r[10]:
-                        last = f"写块失败 0x{here:06X} code={r[10]}"
+                        last = tr("写块失败 0x{here:06X} code={code}").format(here=here, code=r[10])
                         time.sleep(0.04 * (attempt + 1))
                         continue
                     time.sleep(0.012)
@@ -332,12 +335,12 @@ class Link:
                     if back == chunk:
                         last = None
                         break
-                    last = f"回读不符 @0x{here:06X}"
+                    last = tr("回读不符 @0x{here:06X}").format(here=here)
                 except Exception as e:
                     last = str(e)
                 time.sleep(0.04 * (attempt + 1))
             if last:
-                raise TimeoutError(f"写入 0x{here:06X} 失败：{last}")
+                raise TimeoutError(tr("写入 0x{here:06X} 失败：{why}").format(here=here, why=last))
 
     def set_clock(self, when=None):
         """Push the wall clock so the radio does not need six keypad digits."""
@@ -351,7 +354,7 @@ class Link:
             # 不回包，以前这里只发 4 字节，于是第二次 ask 又超时（报告 第六部分·回归项 10）。
             r = self.ask(0x0766, struct.pack("<HIH", days, secs, 0), 9)
         if r[8]:
-            raise RuntimeError(f"对时失败 code={r[8]}")
+            raise RuntimeError(tr("对时失败 code={code}").format(code=r[8]))
         # 回包里 Seconds 是固件**真正收下**的秒数（uart.c 的 0x0767 载荷）。
         # 只验 Status 会漏掉两种现场：串口线上字节被吃掉，固件按收到的字节
         # 算出一个别的秒数，照样返回 Status=0；或者时钟内部钳位没生效。
@@ -362,9 +365,9 @@ class Link:
         # 完全看不出来 —— 表面 ✓ 对时成功，实际整张过境表的时间轴整体偏移。
         back = struct.unpack("<I", r[4:8])[0]
         if back != secs:
-            raise RuntimeError(
-                f"对时回显不符：发了 {secs} s，电台回 {back} s"
-                f"（差 {back - secs:+d} s）——电台时钟没跟着走")
+            raise RuntimeError(tr(
+                "对时回显不符：发了 {want} s，电台回 {got} s（差 {diff:+d} s）——电台时钟没跟着走"
+            ).format(want=secs, got=back, diff=back - secs))
         return secs
 
     CHUNK = 128      # the radio only ever moves one flash chunk per command
@@ -388,32 +391,43 @@ class Link:
                 # FIX(PROTO): 以前这里一律说"三次都没回包"。真机上最常见的原因
                 # 恰恰是**回了**但字节不对（长度/CRC/ID），把它说成"没回包"会
                 # 把排查方向指错。现在把最后一次的真实原因带上。
-                raise TimeoutError(
-                    f"回读 0x{addr + len(out):06X} 三次都失败：{last}"
-                )
+                raise TimeoutError(tr(
+                    "回读 0x{addr:06X} 三次都失败：{last}"
+                ).format(addr=addr + len(out), last=last))
             if r[10]:
-                raise RuntimeError(f"回读失败 0x{addr + len(out):06X} code={r[10]}")
+                raise RuntimeError(tr("回读失败 0x{addr:06X} code={code}").format(
+                    addr=addr + len(out), code=r[10]))
             out += r[11:11 + n]
         return bytes(out)
 
 
-def local(dt):
-    """UTC → 本机本地时刻。
+def manual_tz_hours(text):
+    """手动时区输入：-12..14 的小时数（允许 5.5 / 5.75 这种半小时制）。
+    空/越界/非数返回 None —— 由调用方退回系统时区并在界面上标出来。"""
+    try:
+        v = float(str(text).strip())
+    except (TypeError, ValueError):
+        return None
+    if -12.0 <= v <= 14.0:
+        return v
+    return None
 
-    以前硬编码 +8，而写表用的 core.local_tz_hours() 取系统时区；非 UTC+8
-    的机器上"界面看到的"和"真正写进电台的"差 8−tz 小时（U-P-19）。
-    现在两边同源。"""
-    return dt + timedelta(hours=core.local_tz_hours())
+
+def local(dt, hours=None):
+    """UTC → 台站本地时刻。
+
+    hours 必须由界面侧显式传（单一真值 Tool._tz_hours()）；不传只服务
+    命令行老路径，退回系统时区。"""
+    return dt + timedelta(hours=core.local_tz_hours() if hours is None else hours)
 
 
-def tz_label():
+def tz_label(hours):
     """UTC 偏移的显示串。
 
-    负时区（如 UTC-3:30）必须拼成 "-3:30"，不能直接 f"UTC{int(h):+d}"
+    负偏移必须拼成 "-3:30"，不能直接 f"UTC{int(h):+d}"
     ——那会拼出 "UTC+-3" 这种非法字符串。"""
-    h = core.local_tz_hours()
-    sign = "-" if h < 0 else "+"
-    total = int(round(abs(h) * 60))
+    sign = "-" if hours < 0 else "+"
+    total = abs(int(round(hours * 60)))
     return f"UTC{sign}{total // 60}:{total % 60:02d}"
 
 
@@ -452,13 +466,13 @@ def tle_stamp(v):
 def age_label(stamp):
     """把 epoch 时间说成人话：0 分钟 / 3 小时 / 6 天。"""
     if not stamp:
-        return "时间未知"
+        return tr("时间未知")
     d = max(0.0, time.time() - stamp)
     if d < 3600:
-        return f"{int(d // 60)} 分钟前"
+        return tr("{n} 分钟前").format(n=int(d // 60))
     if d < 86400:
-        return f"{int(d // 3600)} 小时前"
-    return f"{int(d // 86400)} 天前"
+        return tr("{n} 小时前").format(n=int(d // 3600))
+    return tr("{n} 天前").format(n=int(d // 86400))
 
 
 # ------------------------------------------------------------------ app
@@ -514,15 +528,18 @@ def verify_table(link, table, tick):
             if got[i] != want[i]:
                 return off + i, got[i]
         return off + n, 0xFF
-    tick(f"回读 {len(table)} B 一致")
+    tick(tr("回读 {n} B 一致").format(n=len(table)))
     return None
 
 
-def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
+def radio_write(port, table, allow_unlock=False, tick=None, notes=None,
+                tz_hours=None):
     """把一张表写进电台。GUI 与命令行共用这一条路径。
 
     tick(text, done, total)：进度回调，命令行传 None 就只走日志。
     notes：输出参数，回填 fw 标识与对时备注。失败抛 RuntimeError。
+    tz_hours：台站时区。表里的 aos2 和对时推的钟必须同一个基准，
+    所以这里收的是界面算好的那一个数；命令行不传=系统时区（旧行为）。
     """
     tick = tick or (lambda text, done, total: None)
     notes = notes if notes is not None else {}
@@ -544,23 +561,25 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
         try:
             proto, state, phase = link.hello()
         except Exception as e:
-            raise RuntimeError(
-                f"电台没回应握手（0x076A）：{e} —— 检查 USB 线、端口号，"
-                f"或者这台机器刷的不是带多普勒功能的固件")
+            raise RuntimeError(tr(
+                "电台没回应握手（0x076A）：{e} —— 检查 USB 线、端口号，"
+                "或者这台机器刷的不是带多普勒功能的固件").format(e=e))
         if proto < MIN_PROTO:
-            raise RuntimeError(
-                f"固件 proto={proto} 太老（要 ≥{MIN_PROTO}，带过境表读写），"
-                f"先刷 v6.3.0 以上的多普勒固件；电台里的旧表没动")
+            raise RuntimeError(tr(
+                "固件 proto={p} 太老（要 ≥{m}，带过境表读写），"
+                "先刷 v6.3.0 以上的多普勒固件；电台里的旧表没动"
+            ).format(p=proto, m=MIN_PROTO))
         # 固件标识只用来"说清是哪台机器"，不参与放行：老固件不认 0x0772
         # 是常态，不能因为读不到版本就拒绝写表。
         try:
             tag = link.fw_tag()
         except Exception:
             tag = None
-        notes["fw"] = (f" · {tag['ver']} ppm={tag['ppm']:+d}" if tag
-                       else " · 固件标识读不到（老固件）")
-        log_line("HELLO", f"{port} proto={proto} state={state} phase={phase}"
-                          f"{notes['fw']} 表={len(table)}B 擦={len(sectors)}扇区")
+        notes["fw"] = (tr(" · {v} ppm={p:+d} 修正").format(v=tag['ver'], p=tag['ppm']) if tag
+                       else tr(" · 固件标识读不到（老固件）"))
+        log_line("HELLO", tr("{port} proto={proto} state={state} phase={phase}{fw} 表={tb}B 擦={s}扇区").format(
+            port=port, proto=proto, state=state, phase=phase, fw=notes['fw'],
+            tb=len(table), s=len(sectors)))
         st = table_stats(table)
         # D2：与 App 同口径的六个数字，一次写入打一行。len 必须等于
         # 16 + 40×entries + 6×pts，这是三端锁死的公式。
@@ -577,8 +596,8 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
 
         errs = core.validate_table(table)
         if errs:
-            raise RuntimeError("表格自检没通过，已中止（电台里的旧表没动）："
-                               + "；".join(errs[:3]))
+            raise RuntimeError(tr("表格自检没通过，已中止（电台里的旧表没动）：{errs}")
+                               .format(errs="；".join(errs[:3])))
 
         # ── 0.5 归属探测：擦第一个扇区之前，先把整块表区读回来认主 ──
         # 固件在擦除命令里也会逐个扇区判（DPH_TableErase），但那个判断
@@ -592,19 +611,19 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
             # 用户显式勾了"允许擦除表区"才走这条：先借额度，
             # 借不到（老固件/令牌不对）就原样退出，一个字节不动。
             if not allow_unlock:
-                raise RuntimeError(
-                    "表区被人占着，已中止（一个字节都没动）：" + why +
+                raise RuntimeError(tr(
+                    "表区被人占着，已中止（一个字节都没动）：{why}"
                     "\n\n要在这个位置装表，勾上写表按钮左边的"
                     "「允许擦除表区」再点一次（那块数据不可恢复），"
-                    "或者先跑 clear_table.py --yes。")
+                    "或者先跑 clear_table.py --yes。").format(why=why))
             token, credits = link.unlock_region()
             if credits == 0:
-                raise RuntimeError(
+                raise RuntimeError(tr(
                     "固件不认这次解锁（0x0776 没应答或令牌不符），已中止："
                     "一个字节都没动。\n这台机器的固件不支持受控清地，"
-                    "先刷本轮固件，或用旧版 clear_table.py --yes。")
-            log_line("UNLOCK", f"token=0x{token:08X} credits={credits} "
-                               f"表区将被清空后重写")
+                    "先刷本轮固件，或用旧版 clear_table.py --yes。"))
+            log_line("UNLOCK", tr("token=0x{tok:08X} credits={c} 表区将被清空后重写").format(
+                tok=token, c=credits))
         log_line("PROBE", " ".join(f"0x{a:06X}:{c}" for a, c in classes))
 
         # 对时失败就不再往下写：表里的时间戳是相对电台时钟的绝对秒，
@@ -612,12 +631,15 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
         # 这件事（它照着自己的钟倒计时）。以前这里只记一句备注继续写，
         # 结果是"写入成功、过境全错"。宁可在擦除前退出，旧表一根不动。
         try:
-            link.set_clock()
+            if tz_hours is None:
+                link.set_clock()
+            else:
+                link.set_clock(datetime.now(timezone.utc) + timedelta(hours=tz_hours))
         except Exception as e:
-            raise RuntimeError(
-                f"对时失败，已中止（电台里的旧表没动）：{e}"
-                f"\n先把电台的日期/时间校准，或在按「写入电台」前确认 "
-                f"{port} 只被本程序占用")
+            raise RuntimeError(tr(
+                "对时失败，已中止（电台里的旧表没动）：{e}"
+                "\n先把电台的日期/时间校准，或在按「写入电台」前确认 "
+                "{port} 只被本程序占用").format(e=e, port=port))
         body_len = max(0, len(table) - core.DPH_HDR)
         total[0] = len(sectors) + (body_len + 127) // 128 + 3
 
@@ -641,30 +663,32 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
             # （2026-11-08 真机上踩到过）。反过来擦就一路 own=OURS 放行。
             for a in sorted(sectors, reverse=True):
                 link.erase(a)
-                step_text(f"擦除 0x{a:06X}" + (f" · 第 {attempt} 遍" if attempt > 1 else ""))
-            step_text("擦除完成")
+                step_text(tr("擦除 0x{a:06X}").format(a=a)
+                          + (tr(" · 第 {n} 遍").format(n=attempt) if attempt > 1 else ""))
+            step_text(tr("擦除完成"))
             if body_len:
                 link.write(core.TABLE_START + core.DPH_HDR, table[core.DPH_HDR:])
-                step_text(f"写入 {body_len} B")
+                step_text(tr("写入 {n} B").format(n=body_len))
             link.write(core.TABLE_START, table[:core.DPH_HDR])
-            step_text(f"表头 {core.DPH_HDR} B")
+            step_text(tr("表头 {n} B").format(n=core.DPH_HDR))
 
             bad = verify_table(link, table, step_text)
             if bad is None:
                 break
             if attempt >= 2:
                 off, got = bad
-                raise RuntimeError(
-                    f"整表回读两遍都不符，最后在 0x{core.TABLE_START + off:06X}"
-                    f"（设备 0x{got:02X} ≠ 表 0x{table[off]:02X}）——"
-                    f"电台里现在是一张不可信的表，再写一次；"
-                    f"连续出现就换 USB 线、换口，或降低串口抖动")
-            log_line("RETRY", f"整表回读不符 @0x{core.TABLE_START + bad[0]:06X}"
-                              f"（设备 0x{bad[1]:02X}），第 {attempt} 遍重写")
-            step_text(f"回读不符 @0x{core.TABLE_START + bad[0]:06X}，重写")
+                raise RuntimeError(tr(
+                    "整表回读两遍都不符，最后在 0x{addr:06X}"
+                    "（设备 0x{dev:02X} ≠ 表 0x{want:02X}）——"
+                    "电台里现在是一张不可信的表，再写一次；"
+                    "连续出现就换 USB 线、换口，或降低串口抖动"
+                ).format(addr=core.TABLE_START + off, dev=got, want=table[off]))
+            log_line("RETRY", tr("整表回读不符 @0x{addr:06X}（设备 0x{dev:02X}），第 {n} 遍重写").format(
+                addr=core.TABLE_START + bad[0], dev=bad[1], n=attempt))
+            step_text(tr("回读不符 @0x{addr:06X}，重写").format(addr=core.TABLE_START + bad[0]))
 
-        log_line("OK", f"写入完成 {len(table)}B / 擦 {len(sectors)} 扇区"
-                       f"{notes['fw']}")
+        log_line("OK", tr("写入完成 {n}B / 擦 {s} 扇区{fw}").format(
+            n=len(table), s=len(sectors), fw=notes['fw']))
         return st
     finally:
         if link:
@@ -674,10 +698,14 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None):
 class Tool(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.cfg = self.load_cfg()
+        i18n.set_language(self.cfg.get("lang", "zh"))
+        # 切换语言时要重画的东西：build() 里每处登记一条闭包。
+        self._lang_hooks = []
         # 标题只放程序名和开发者，基座致谢挪到左栏底部（见下）。
         # 原来把"（固件基座 F4HWN SSTV）"塞进标题栏，任务栏一缩就变成
         # "多普勒过境表 · BG0…"，两个名字都读不全 —— 致谢不该靠标题栏承载。
-        self.title(f"{APP_NAME} · 写表")
+        self.title(tr("{app} · 写表").format(app=tr(APP_NAME)))
         try:
             self.iconbitmap(_res("app.ico"))
         except Exception as e:
@@ -698,7 +726,6 @@ class Tool(tk.Tk):
             self.attributes("-zoomed", True)
         self.minsize(980, 700)
         self.configure(bg=BG)
-        self.cfg = self.load_cfg()
 
         self.sats = []            # Sat objects, favourites first
         self.tle_at = 0.0
@@ -735,7 +762,7 @@ class Tool(tk.Tk):
         # 这条把 PC 工具纳进同一条口径。
         base = {"lat": "", "lon": "", "days": 3, "min_el": 10.0,
                 "step": 10.0, "norad": 25544, "port": "", "fav": [25544],
-                "freq": {}}
+                "freq": {}, "lang": "zh", "tz_mode": "auto", "tz": ""}
         try:
             with open(CONFIG, encoding="utf-8") as f:
                 base.update(json.load(f))
@@ -758,6 +785,128 @@ class Tool(tk.Tk):
                 json.dump(self.cfg, f, indent=2)
         except Exception:
             pass
+
+    # --- language ----------------------------------------------------
+    def _tx(self, w, key):
+        """静态控件文案：现在设一次，切语言时按登记的键重设。"""
+        def apply():
+            w.config(text=tr(key))
+        apply()
+        self._lang_hooks.append(apply)
+        return w
+
+    # --- timezone ----------------------------------------------------
+    def _tz_hours(self):
+        """时区唯一真值：手动填写 > 系统时区（系统自带各国政策与夏令时）。
+        界面显示、build_table 的 aos2、对时推的钟，三处必须都从这里取。"""
+        if self.cfg.get("tz_mode") == "manual":
+            v = manual_tz_hours(self.e_tz.get() if hasattr(self, "e_tz")
+                                else self.cfg.get("tz", ""))
+            if v is not None:
+                return v
+        return core.local_tz_hours()
+
+    def cur_tz(self):
+        """当前界面时区（小时）。过境结果缓存的生成代里记着它，
+        改了时区没点「计算」时，旧结果仍按旧时区显示，不会新旧混排。"""
+        return getattr(self, "_pass_tz", None)
+
+    def _tz_row_refresh(self):
+        self.cb_tz_mode.config(values=[tr("自动（系统）"), tr("手动")])
+        self.cb_tz_mode.current(1 if self.cfg.get("tz_mode") == "manual" else 0)
+        manual_on = self.cfg.get("tz_mode") == "manual"
+        self.e_tz.config(state="normal" if manual_on else "disabled",
+                         disabledbackground=SIDE,
+                         bg=BAD if (manual_on and manual_tz_hours(self.e_tz.get()) is None
+                                   and self.e_tz.get()) else (CARD if manual_on else SIDE))
+        if self.e_tz.get() != str(self.cfg.get("tz", "")):
+            self.e_tz.delete(0, "end")
+            self.e_tz.insert(0, str(self.cfg.get("tz", "")))
+        self.lbl_tz.config(text=self.tz_text(),
+                           fg="#d98a5a" if (manual_on and self.e_tz.get()
+                                            and manual_tz_hours(self.e_tz.get()) is None) else DIM)
+
+    def on_tz_mode(self, ev=None):
+        self.cfg["tz_mode"] = "manual" if self.cb_tz_mode.current() == 1 else "auto"
+        self.save_cfg()
+        self._tz_row_refresh()
+        if self.cfg["tz_mode"] == "manual":
+            self.e_tz.focus_set()      # 切手动就跳进框里，不用猜点哪
+
+    def on_tz_edit(self, ev=None):
+        self.cfg["tz"] = self.e_tz.get()
+        self.save_cfg()
+        bad = manual_tz_hours(self.e_tz.get()) is None and self.e_tz.get().strip() != ""
+        self.e_tz.config(bg=BAD if bad else CARD)
+        self.lbl_tz.config(text=self.tz_text(), fg="#d98a5a" if bad else DIM)
+
+    def tz_text(self):
+        if self.cfg.get("tz_mode") == "manual":
+            v = manual_tz_hours(self.e_tz.get())
+            if v is not None:
+                return tr("时区 {tz} · 手动").format(tz=tz_label(v))
+            if not self.e_tz.get().strip():
+                return tr("手动：填 -12~14 的数字，如 5.5")
+            return tr("手动值无效，退回 {tz}").format(tz=tz_label(core.local_tz_hours()))
+        return tr("时区 {tz} · 按系统").format(tz=tz_label(core.local_tz_hours()))
+
+    def set_language(self, code):
+        code = i18n.set_language(code)
+        self.cfg["lang"] = code
+        self.save_cfg()
+        self.title(tr("{app} · 写表").format(app=tr(APP_NAME)))
+        for fn in self._lang_hooks:
+            fn()
+        self.btn_lang.config(text="中" if code == "zh" else "EN")
+        self.fill_list()
+        self._render_count()
+        self._render_tle_line()
+        if self.passes:
+            self.show_passes(self.passes)
+        if getattr(self, "sat", None):
+            self._rebuild_trans_values()
+            self._show_freq()
+            sel = self.tree.selection()
+            if sel and self.rows:
+                try:
+                    self.show_detail(self.rows[int(sel[0])])
+                except (ValueError, IndexError):
+                    pass
+
+    def _render_count(self):
+        """左栏计数行：切语言时要按当前状态重画（set_sats/compute_next 也走这里）。"""
+        if getattr(self, "station_unset", False):
+            self.lbl_count.config(text=tr("{n} 颗 未设台站").format(n=len(self.sats)))
+        else:
+            self.lbl_count.config(text=tr("{n} 颗").format(n=len(self.sats)))
+
+    def _render_tle_line(self):
+        """TLE 来源行：联网/缓存/离线三种说法，按当前状态重画。"""
+        if not self.sats:
+            return
+        if getattr(self, "tle_offline", False):
+            self.lbl_tle.config(text=tr("离线 · 缓存 {n} 颗 · {age}").format(
+                n=len(self.sats), age=age_label(self.tle_at)), fg="#d9a95a")
+        elif getattr(self, "tle_from_cache", False):
+            self.lbl_tle.config(text=tr("缓存 {n} 颗 · {age}").format(
+                n=len(self.sats), age=age_label(self.tle_at)), fg=DIM)
+        elif self.tle_at:
+            when = time.strftime("%m-%d %H:%M", time.localtime(self.tle_at))
+            self.lbl_tle.config(text=tr("已更新 · {n} 颗 · {when}").format(
+                n=len(self.sats), when=when), fg=ACC)
+        else:
+            self.lbl_tle.config(text=tr("已更新 · {n} 颗").format(n=len(self.sats)), fg=ACC)
+
+    def _trans_values(self):
+        s = self.sat
+        trs = list(getattr(s, "transponders", []) or [])
+        return [f"{t.down_mhz:.4f} MHz · {tr(t.name)}" for t in trs] + [tr(CUSTOM_TRANS_LABEL)]
+
+    def _rebuild_trans_values(self):
+        i = self.cb_trans.current()
+        self.cb_trans.config(values=self._trans_values())
+        if 0 <= i < len(self.cb_trans["values"]):
+            self.cb_trans.current(i)
 
     # --- layout -----------------------------------------------------
     def build(self):
@@ -792,13 +941,26 @@ class Tool(tk.Tk):
         # 基座致谢：电台固件是 F4HWN 的 SSTV v6.3.0，多普勒这一层是本工具加的。
         # 侧栏底部常驻一行，不靠标题栏承载（标题栏会被任务栏截断）。
         # 这里同时是「关于」：产品名 + 版本 + 作者呼号都在这一行里。
-        tk.Label(left, text=f"{APP_NAME} v{APP_VERSION}\nF4HWN SSTV v6.3.0 · BG0FPJ",
-                 bg=SIDE, fg=DIM, font=("Microsoft YaHei UI", 8),
-                 justify="left", anchor="w").pack(side="bottom", fill="x",
-                                                  padx=10, pady=(0, 8))
+        _lbl_about = tk.Label(left, bg=SIDE, fg=DIM, font=("Microsoft YaHei UI", 8),
+                              justify="left", anchor="w")
+        def _about():
+            _lbl_about.config(text=tr("{app} v{v}\nF4HWN SSTV v6.3.0 · BG0FPJ").format(
+                app=tr(APP_NAME), v=APP_VERSION))
+        _about()
+        self._lang_hooks.append(_about)
+        _lbl_about.pack(side="bottom", fill="x", padx=10, pady=(0, 8))
 
-        tk.Label(left, text="卫星", bg=SIDE, fg=DIM,
-                 font=("Microsoft YaHei UI", 9), anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+        # 语言开关：中/EN 一键切换，选择存进 cfg，重启保持。
+        self.btn_lang = tk.Button(left, text="中" if i18n.get_language() == "zh" else "EN",
+                                  command=lambda: self.set_language(
+                                      "en" if i18n.get_language() == "zh" else "zh"),
+                                  bg="#2f3538", fg=DIM, bd=0, padx=8, pady=2,
+                                  activebackground="#3a4448", activeforeground=FG,
+                                  font=("Consolas", 9))
+        self.btn_lang.pack(side="bottom", anchor="w", padx=10, pady=(0, 4))
+
+        self._tx(tk.Label(left, text="卫星", bg=SIDE, fg=DIM,
+                 font=("Microsoft YaHei UI", 9), anchor="w"), "卫星").pack(fill="x", padx=10, pady=(10, 2))
 
         row_tle = tk.Frame(left, bg=SIDE)
         row_tle.pack(fill="x", padx=10, pady=(4, 0))
@@ -810,15 +972,33 @@ class Tool(tk.Tk):
                                  bg="#2f3538", fg=FG, bd=0, padx=10, pady=3,
                                  activebackground="#3a4448", activeforeground=FG,
                                  font=("Microsoft YaHei UI", 9))
+        self._lang_hooks.append(lambda: self.btn_tle.config(text=tr("更新 TLE")))
         self.btn_tle.pack(side="left")
 
         self.lbl_tle = tk.Label(row_tle, text="", bg=SIDE, fg=DIM,
                                 font=("Microsoft YaHei UI", 8), anchor="w")
         self.lbl_tle.pack(side="left", padx=(8, 0))
 
-        # 时区口径写在界面上：用户不用猜"界面这个 8 是从哪来的"（U-P-19）。
-        tk.Label(left, text=f"时区 {tz_label()}", bg=SIDE, fg=DIM,
-                 font=("Microsoft YaHei UI", 8), anchor="w").pack(fill="x", padx=10)
+        # 时区口径写在界面上：默认系统（自带政策与夏令时），可手动覆盖（U-P-19 终版）。
+        # 输入框必须带可见边框并自动聚焦——上一版跟背景同色，没人看出那是能打的框。
+        row_tz = tk.Frame(left, bg=SIDE)
+        row_tz.pack(fill="x", padx=10, pady=(2, 0))
+        self.cb_tz_mode = ttk.Combobox(row_tz, width=10, state="readonly")
+        self.cb_tz_mode.bind("<<ComboboxSelected>>", self.on_tz_mode)
+        self.cb_tz_mode.pack(side="left")
+        self.e_tz = tk.Entry(row_tz, width=7, bd=0,
+                             bg=CARD, fg=FG, insertbackground=FG,
+                             justify="center", font=("Consolas", 10),
+                             highlightthickness=1, highlightbackground=LINE,
+                             highlightcolor=ACC)
+        self.e_tz.bind("<KeyRelease>", self.on_tz_edit)
+        self.e_tz.pack(side="left", padx=(6, 0), ipady=2)
+        self.lbl_tz = tk.Label(left, text="", bg=SIDE, fg=DIM,
+                               font=("Microsoft YaHei UI", 8), anchor="w",
+                               justify="left")
+        self.lbl_tz.pack(fill="x", padx=10, pady=(2, 0))
+        self._lang_hooks.append(self._tz_row_refresh)
+        self._tz_row_refresh()
 
         self.e_search = tk.Entry(left, bg=CARD, fg=FG, bd=0, insertbackground=FG)
         self.e_search.pack(fill="x", padx=10, ipady=4)
@@ -830,11 +1010,12 @@ class Tool(tk.Tk):
         self.list_sort = "time"
         self.sort_btns = {}
         for key, txt in (("time", "过境"), ("elev", "仰角"), ("name", "名称")):
-            b = tk.Button(sortrow, text=txt, bd=0, padx=6, pady=2,
+            b = tk.Button(sortrow, text=tr(txt), bd=0, padx=6, pady=2,
                           bg=CARD, fg=DIM, activebackground="#3a4448",
                           activeforeground=FG, font=("Microsoft YaHei UI", 8),
                           command=lambda k=key: self.set_sort(k))
             b.pack(side="left", padx=(0, 3))
+            self._lang_hooks.append(lambda b=b, t=txt: b.config(text=tr(t)))
             self.sort_btns[key] = b
 
         lb_frame = tk.Frame(left, bg=SIDE)
@@ -868,9 +1049,9 @@ class Tool(tk.Tk):
 
         rowf = tk.Frame(left, bg=SIDE)
         rowf.pack(fill="x", padx=10, pady=(0, 10))
-        tk.Button(rowf, text="★ 收藏", command=self.toggle_fav,
+        self._tx(tk.Button(rowf, text="★ 收藏", command=self.toggle_fav,
                   bg="#2f3538", fg=HOT, bd=0, padx=8, pady=3,
-                  activebackground="#3a4448", activeforeground=HOT).pack(side="left")
+                  activebackground="#3a4448", activeforeground=HOT), "★ 收藏").pack(side="left")
         self.lbl_count = tk.Label(rowf, text="", bg=SIDE, fg=DIM,
                                   font=("Consolas", 8))
         self.lbl_count.pack(side="right")
@@ -916,8 +1097,8 @@ class Tool(tk.Tk):
         # 想写 SSTV，写进去的还是 437.800，屏幕上还看不出来。
         r2b = tk.Frame(info, bg=CARD)
         r2b.pack(fill="x", pady=(0, 2))
-        tk.Label(r2b, text="转发器", bg=CARD, fg=DIM,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left")
+        self._tx(tk.Label(r2b, text="转发器", bg=CARD, fg=DIM,
+                 font=("Microsoft YaHei UI", 8)), "转发器").pack(side="left")
         self.cb_trans = ttk.Combobox(r2b, values=[], state="readonly", width=32)
         self.cb_trans.pack(side="left", padx=(6, 0))
         self.cb_trans.bind("<<ComboboxSelected>>", self.on_trans_change)
@@ -926,20 +1107,20 @@ class Tool(tk.Tk):
         # 一项时才露出来：标称频率 = AOS 那一刻的频率，不是当前频率，所以
         # 文案里把"标称"写死，免得有人拿屏幕上的实时读数往里填。
         self.frm_custom = tk.Frame(info, bg=CARD)
-        tk.Label(self.frm_custom, text="下行 MHz（标称）", bg=CARD, fg=DIM,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left")
+        self._tx(tk.Label(self.frm_custom, text="下行 MHz（标称）", bg=CARD, fg=DIM,
+                 font=("Microsoft YaHei UI", 8)), "下行 MHz（标称）").pack(side="left")
         self.ent_custom_down = tk.Entry(self.frm_custom, width=11, bg=CARD, fg=ACC,
                                         bd=0, insertbackground=FG, justify="center",
                                         font=("Consolas", 9))
         self.ent_custom_down.pack(side="left", padx=(4, 12), ipady=3)
-        tk.Label(self.frm_custom, text="上行 MHz（空=仅接收）", bg=CARD, fg=DIM,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left")
+        self._tx(tk.Label(self.frm_custom, text="上行 MHz（空=仅接收）", bg=CARD, fg=DIM,
+                 font=("Microsoft YaHei UI", 8)), "上行 MHz（空=仅接收）").pack(side="left")
         self.ent_custom_up = tk.Entry(self.frm_custom, width=11, bg=CARD, fg=FG,
                                       bd=0, insertbackground=FG, justify="center",
                                       font=("Consolas", 9))
         self.ent_custom_up.pack(side="left", padx=(4, 12), ipady=3)
-        tk.Label(self.frm_custom, text="AOS 时刻的值", bg=CARD, fg=DIM,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left")
+        self._tx(tk.Label(self.frm_custom, text="AOS 时刻的值", bg=CARD, fg=DIM,
+                 font=("Microsoft YaHei UI", 8)), "AOS 时刻的值").pack(side="left")
         for _e in (self.ent_custom_down, self.ent_custom_up):
             _e.bind("<KeyRelease>", lambda ev: self.recalc())
 
@@ -960,24 +1141,26 @@ class Tool(tk.Tk):
 
         fbar = tk.Frame(mid, bg=BG)
         fbar.pack(fill="x", pady=(0, 4))
-        tk.Label(fbar, text="筛选", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left", padx=(0, 6))
+        self._tx(tk.Label(fbar, text="筛选", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 8)), "筛选").pack(side="left", padx=(0, 6))
         self.el_filter = 0.0
         self.only_checked = False
         self.fbtns = {}
         for val, txt in ((0.0, "全部"), (20.0, "≥20°"), (40.0, "≥40°"),
                          (60.0, "≥60°")):
-            b = tk.Button(fbar, text=txt, bd=0, padx=8, pady=1,
+            b = tk.Button(fbar, text=tr(txt), bd=0, padx=8, pady=1,
                           bg=CARD, fg=DIM, activebackground="#3a4448",
                           activeforeground=FG, font=("Microsoft YaHei UI", 8),
                           command=lambda v=val: self.set_filter(v))
             b.pack(side="left", padx=(0, 4))
+            self._lang_hooks.append(lambda b=b, t=txt: b.config(text=tr(t)))
             self.fbtns[val] = b
         self.btn_checked = tk.Button(fbar, text="只看勾选", bd=0, padx=8, pady=1,
                                      bg=CARD, fg=DIM, activebackground="#3a4448",
                                      activeforeground=FG,
                                      font=("Microsoft YaHei UI", 8),
                                      command=self.toggle_only_checked)
+        self._lang_hooks.append(lambda: self.btn_checked.config(text=tr("只看勾选")))
         self.btn_checked.pack(side="left", padx=(8, 0))
         self.set_filter(0.0, redraw=False)
 
@@ -987,7 +1170,7 @@ class Tool(tk.Tk):
                  ("el", "最高仰角", 96, "el"), ("az", "方位", 64, "az")]
         self.tree = ttk.Treeview(mid, columns=cols, show="headings", height=7)
         for c, t, w, k in heads:
-            self.tree.heading(c, text=t, command=lambda k=k: self.sort_by(k))
+            self.tree.heading(c, text=tr(t), command=lambda k=k: self.sort_by(k))
             # stretch=False: with 6 columns ttk spreads the spare width evenly,
             # which used to shove 最高仰角 / 方位 past the right edge of the
             # window on a 1536 px desktop.
@@ -1002,6 +1185,7 @@ class Tool(tk.Tk):
         self.lbl_hint = tk.Label(
             mid, text="点表头排序",
             bg=BG, fg=DIM, anchor="w", font=("Microsoft YaHei UI", 8))
+        self._lang_hooks.append(lambda: self.lbl_hint.config(text=tr("点表头排序")))
         self.lbl_hint.pack(fill="x", pady=(3, 0))
 
         # detail
@@ -1023,26 +1207,26 @@ class Tool(tk.Tk):
         bot = tk.Frame(right, bg=BG)
         bot.pack(fill="x", padx=14, pady=(2, 0))
 
-        tk.Label(bot, text="纬度", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self._tx(tk.Label(bot, text="纬度", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 9)), "纬度").pack(side="left")
         self.e_lat = self.entry(bot, str(self.cfg["lat"]), 8)
-        tk.Label(bot, text="经度", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self._tx(tk.Label(bot, text="经度", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 9)), "经度").pack(side="left")
         self.e_lon = self.entry(bot, str(self.cfg["lon"]), 8)
 
-        tk.Label(bot, text="天数", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(12, 0))
+        self._tx(tk.Label(bot, text="天数", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 9)), "天数").pack(side="left", padx=(12, 0))
         self.e_days = self.entry(bot, str(self.cfg["days"]), 4)
-        tk.Label(bot, text="仰角°", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self._tx(tk.Label(bot, text="仰角°", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 9)), "仰角°").pack(side="left")
         self.e_el = self.entry(bot, str(self.cfg["min_el"]), 4)
-        tk.Label(bot, text="间隔s", bg=BG, fg=DIM,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        self._tx(tk.Label(bot, text="间隔s", bg=BG, fg=DIM,
+                 font=("Microsoft YaHei UI", 9)), "间隔s").pack(side="left")
         self.e_step = self.entry(bot, str(self.cfg["step"]), 4)
 
-        tk.Button(bot, text="计算", command=self.recalc,
+        self._tx(tk.Button(bot, text="计算", command=self.recalc,
                   bg="#2f3538", fg=FG, bd=0, padx=10, pady=4,
-                  activebackground="#3a4448", activeforeground=FG).pack(side="left", padx=10)
+                  activebackground="#3a4448", activeforeground=FG), "计算").pack(side="left", padx=10)
 
         # write row
         line2 = tk.Frame(right, bg=BG)
@@ -1052,9 +1236,9 @@ class Tool(tk.Tk):
         self.cb_port.set(self.cfg.get("port") or "")
         self.cb_port.pack(side="left")
 
-        tk.Button(line2, text="端口", command=self.reload_ports,
+        self._tx(tk.Button(line2, text="端口", command=self.reload_ports,
                   bg="#2f3538", fg=FG, bd=0, padx=8, pady=4,
-                  activebackground="#3a4448", activeforeground=FG).pack(side="left", padx=6)
+                  activebackground="#3a4448", activeforeground=FG), "端口").pack(side="left", padx=6)
 
         # 顺序改了：「加入待写 / 清空」是一组，中间隔一条竖线再把「写入电台」
         # 放到最右边。以前两个按钮紧挨着，手一滑点到大绿按钮就直接擦 8+ 个
@@ -1062,11 +1246,13 @@ class Tool(tk.Tk):
         self.btn_queue = tk.Button(line2, text="＋ 待写", command=self.queue_add,
                                    bg="#2f3538", fg=FG, bd=0, padx=10, pady=4,
                                    activebackground="#3a4448", activeforeground=FG)
+        self._lang_hooks.append(lambda: self.btn_queue.config(text=tr("＋ 待写")))
         self.btn_queue.pack(side="left", padx=(2, 2))
 
         self.btn_qclear = tk.Button(line2, text="清空", command=self.queue_clear,
                                     bg="#2f3538", fg=FG, bd=0, padx=8, pady=4,
                                     activebackground="#3a4448", activeforeground=FG)
+        self._lang_hooks.append(lambda: self.btn_qclear.config(text=tr("清空")))
         self.btn_qclear.pack(side="left")
 
         tk.Frame(line2, bg=LINE, width=1, height=24).pack(side="left", padx=18)
@@ -1080,12 +1266,14 @@ class Tool(tk.Tk):
             bg=BG, fg=DIM, selectcolor="#2f3538", bd=0, highlightthickness=0,
             activebackground=BG, activeforeground=FG,
             font=("Microsoft YaHei UI", 9))
+        self._lang_hooks.append(lambda: self.chk_unlock.config(text=tr("允许擦除表区")))
         self.chk_unlock.pack(side="left", padx=(0, 2))
 
         self.btn_write = tk.Button(line2, text="写入电台", command=self.write_radio,
                                    bg="#3d6b30", fg="#eaf5e0", bd=0, padx=18, pady=5,
                                    font=("Microsoft YaHei UI", 10, "bold"),
                                    activebackground="#4a7f3a", activeforeground="#eaf5e0")
+        self._lang_hooks.append(lambda: self.btn_write.config(text=tr("写入电台")))
         self.btn_write.pack(side="left", padx=12)
 
         self.prog = ttk.Progressbar(line2, length=150, mode="determinate")
@@ -1094,6 +1282,11 @@ class Tool(tk.Tk):
         self.lbl_status = tk.Label(line2, text="", bg=BG, fg=DIM,
                                    font=("Microsoft YaHei UI", 9))
         self.lbl_status.pack(side="left", padx=10)
+
+        # 启动时界面就是英文（cfg 里存着 lang=en）的话，上面"创建时先写中文、
+        # 钩子负责切换时重画"的那批控件必须当场补画一遍，否则按钮保持中文。
+        for fn in self._lang_hooks:
+            fn()
 
         self.bind("<Configure>", self._on_resize)
 
@@ -1179,9 +1372,9 @@ class Tool(tk.Tk):
         却写"已更新"，U-P-2）。启动时的自动载入仍然走缓存优先，避免无网时
         等 celestrak 超时。
         """
-        self.lbl_count.config(text="载入…")
+        self.lbl_count.config(text=tr("载入…"))
         self.btn_tle.config(state="disabled")
-        self.lbl_tle.config(text="联网刷新 TLE…" if force else "载入 TLE…", fg=DIM)
+        self.lbl_tle.config(text=tr("联网刷新 TLE…") if force else tr("载入 TLE…"), fg=DIM)
         self.tle_offline = False
         self.tle_from_cache = False
         self.tle_at = 0.0
@@ -1297,15 +1490,15 @@ class Tool(tk.Tk):
     def _poll_load(self):
         got = self._loaded
         if got is None:
-            self.lbl_count.config(text="载入…")
+            self.lbl_count.config(text=tr("载入…"))
             self.after(300, self._poll_load)
             return
         sats, err = got
         if sats is None:
-            self.lbl_count.config(text="离线")
-            self.lbl_tle.config(text="取失败", fg="#d98a5a")
+            self.lbl_count.config(text=tr("离线"))
+            self.lbl_tle.config(text=tr("取失败"), fg="#d98a5a")
             self.btn_tle.config(state="normal")
-            self.lbl_status.config(text=f"卫星表失败：{err}", fg="#d98a5a")
+            self.lbl_status.config(text=tr("卫星表失败：{err}").format(err=err), fg="#d98a5a")
             return
         # 离线提示交给 set_sats 统一出（它会带上"最老数据多久前"），这里不再
         # 单独写一遍再被覆盖。
@@ -1327,7 +1520,7 @@ class Tool(tk.Tk):
             self.nextp = {}
             self.station_unset = True
             try:
-                self.lbl_count.config(text=f"{len(self.sats)} 颗 未设台站")
+                self._render_count()
             except Exception:
                 pass
             if redraw:
@@ -1360,22 +1553,12 @@ class Tool(tk.Tk):
         self.sats = sats
         self.by_norad = {s.norad: s for s in sats}
         self.nextp = {}
-        self.lbl_count.config(text=f"{len(sats)} 颗")
+        self._render_count()
         self.btn_tle.config(state="normal")
         # 这里以前无条件写"TLE 已更新"，把 _poll_load 刚设置的"离线 · 用本地
         # 缓存"立刻盖掉，于是断网时界面也报"已更新"（U-P-2/U-P-3）。现在按来源分支：
-        # 联网成功 / 命中缓存 / 离线回退，三种说法不一样。
-        if getattr(self, "tle_offline", False):
-            self.lbl_tle.config(text=f"离线 · 缓存 {len(sats)} 颗 · "
-                                     f"{age_label(self.tle_at)}", fg="#d9a95a")
-        elif getattr(self, "tle_from_cache", False):
-            self.lbl_tle.config(text=f"缓存 {len(sats)} 颗 · {age_label(self.tle_at)}",
-                                fg=DIM)
-        elif self.tle_at:
-            when = time.strftime("%m-%d %H:%M", time.localtime(self.tle_at))
-            self.lbl_tle.config(text=f"已更新 · {len(sats)} 颗 · {when}", fg=ACC)
-        else:
-            self.lbl_tle.config(text=f"已更新 · {len(sats)} 颗", fg=ACC)
+        # 联网成功 / 命中缓存 / 离线回退，三种说法不一样（见 _render_tle_line）。
+        self._render_tle_line()
 
         # Two stages on purpose: the list is usable the instant it is drawn,
         # and the "next pass" column fills in a beat later instead of the
@@ -1413,7 +1596,7 @@ class Tool(tk.Tk):
         return np_[0].timestamp() if np_ else 9e18
 
     def _label(self, s, fav):
-        cn = sat_freq.CNNAME.get(s.norad)
+        cn = None if i18n.get_language() == "en" else sat_freq.CNNAME.get(s.norad)
         if cn:
             short = s.name.split(" (")[0]
             combo = f"{cn} · {short}"
@@ -1429,6 +1612,7 @@ class Tool(tk.Tk):
     def fill_list(self):
         q = self.e_search.get().strip().lower()
         fav = set(self.cfg.get("fav", []))
+        tz = self.cur_tz()
         items = []
         for s in self.sats:
             if q and q not in s.name.lower() and q not in str(s.norad):
@@ -1452,7 +1636,7 @@ class Tool(tk.Tk):
                 # aos 是 UTC 的裸 datetime；astimezone() 对裸时间按本机时区解释，
                 # 等于又加了一遍偏移。统一走 local()，和表格/详情页同一个口径
                 # （U-P-19）。
-                t = local(aos)
+                t = local(aos, tz)
                 txt = t.strftime("%H:%M") if t.date() == datetime.now().date() else t.strftime("%d %H:%M")
                 els = f"{el:.0f}°"
             else:
@@ -1506,7 +1690,7 @@ class Tool(tk.Tk):
         trs = list(getattr(s, "transponders", []) or [])
         # 最后一项永远是「自定义…」：星上一条预置都没有时，它就是唯一可选
         # 的那条（以前这里把下拉 disable 掉，等于这颗星根本写不进去）。
-        self.cb_trans.config(values=[t.label for t in trs] + [CUSTOM_TRANS_LABEL])
+        self.cb_trans.config(values=self._trans_values())
         self.cb_trans.config(state="readonly")
         self.cb_trans.current(0)
         self.custom_tr = None
@@ -1522,7 +1706,7 @@ class Tool(tk.Tk):
             extra.append((f"SSTV {sstv_mhz:.3f} MHz {s.sstv}".strip()
                           if sstv_mhz else f"SSTV {s.sstv}"))
         self.lbl_extra.config(text="   ".join(extra))
-        self.lbl_blurb.config(text=s.blurb or "业余卫星")
+        self.lbl_blurb.config(text=tr(s.blurb or "业余卫星"))
         self.draw_pic()
 
         try:
@@ -1604,22 +1788,22 @@ class Tool(tk.Tk):
         if not s:
             return
         if not s.known:
-            self.lbl_freq.config(text="频率未知")
+            self.lbl_freq.config(text=tr("频率未知"))
             self.lbl_tone.config(text="")
-            self.lbl_mode.config(text=s.mode or "")
+            self.lbl_mode.config(text=tr(s.mode or ""))
             return
-        tr = self.sel_trans()
-        if tr is None:
-            tr = sat_freq.Transponder(s.mode or "下行", s.freq_mhz,
+        tr0 = self.sel_trans()
+        if tr0 is None:
+            tr0 = sat_freq.Transponder(s.mode or "下行", s.freq_mhz,
                                       getattr(s, "up_mhz", 0.0) or 0.0,
                                       getattr(s, "up_tone", 0.0) or 0.0)
         # 名字一起显示：只写"437.5500 MHz"时，操作员看不出这是 SSTV 还是中继。
-        self.lbl_freq.config(text=f"{tr.down_mhz:.4f} MHz · {tr.name}")
-        if tr.up_mhz:
-            t = f" · 亚音 {tr.tone_hz:g} Hz" if tr.tone_hz else ""
-            self.lbl_tone.config(text=f"上行 {tr.up_mhz:.4f} MHz{t}")
+        self.lbl_freq.config(text=f"{tr0.down_mhz:.4f} MHz · {tr(tr0.name)}")
+        if tr0.up_mhz:
+            t = tr(" · 亚音 {t} Hz").format(t=f"{tr0.tone_hz:g}") if tr0.tone_hz else ""
+            self.lbl_tone.config(text=tr("上行 {m} MHz{t}").format(m=f"{tr0.up_mhz:.4f}", t=t))
         else:
-            self.lbl_tone.config(text=f"哑音 {tr.tone_hz:g} Hz" if tr.tone_hz else "")
+            self.lbl_tone.config(text=tr("哑音 {t} Hz").format(t=f"{tr0.tone_hz:g}") if tr0.tone_hz else "")
         # 模式名已经在频率大字里了（"437.5500 MHz · SSTV"），右边再写一遍是叠字。
         self.lbl_mode.config(text="")
 
@@ -1675,21 +1859,21 @@ class Tool(tk.Tk):
             # 这里。原来一句"都填数字"分不清是"没填"还是"填错了"，
             # 而这两件事的下一步动作完全不同。
             if not (self.e_lat.get().strip() and self.e_lon.get().strip()):
-                messagebox.showerror("台站",
-                                     "先填经纬度（十进制度，如 31.2304 / 121.4737，"
-                                     "西经南纬填负数）")
+                messagebox.showerror(tr("台站"), tr(
+                    "先填经纬度（十进制度，如 31.2304 / 121.4737，"
+                    "西经南纬填负数）"))
             else:
-                messagebox.showerror("参数", "经纬度/天数/仰角/间隔 填数字")
+                messagebox.showerror(tr("参数"), tr("经纬度/天数/仰角/间隔 填数字"))
             return None
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            messagebox.showerror("参数", "纬度 -90..90，经度 -180..180")
+            messagebox.showerror(tr("参数"), tr("纬度 -90..90，经度 -180..180"))
             return None
         if step < core.DPH_STEP_MS_MIN / 1000.0:
-            messagebox.showerror("参数",
-                                 f"间隔最小 {core.DPH_STEP_MS_MIN // 1000} 秒")
+            messagebox.showerror(tr("参数"),
+                                 tr("间隔最小 {n} 秒").format(n=core.DPH_STEP_MS_MIN // 1000))
             return None
         if not (1 <= days <= 10):
-            messagebox.showerror("参数", "天数 1..10")
+            messagebox.showerror(tr("参数"), tr("天数 1..10"))
             return None
         self.cfg.update(lat=lat, lon=lon, days=days, min_el=min_el, step=step)
         self.save_cfg()
@@ -1715,7 +1899,7 @@ class Tool(tk.Tk):
             freq = 145.8e6
         self._recalc_gen = getattr(self, "_recalc_gen", 0) + 1
         gen = self._recalc_gen
-        self.lbl_status.config(text="计算中…", fg=DIM)
+        self.lbl_status.config(text=tr("计算中…"), fg=DIM)
 
         def work():
             ps = core.find_passes(satrec_now, gnd, freq, days=days,
@@ -1734,6 +1918,7 @@ class Tool(tk.Tk):
             def apply():
                 if gen != self._recalc_gen:
                     return          # 已经有更新一代的结果了，这份丢弃
+                self._pass_tz = self._tz_hours()   # 这批样点用的时区，显示同基准
                 self.show_passes(ps)
             self.after(0, apply)
         threading.Thread(target=work, daemon=True).start()
@@ -1792,10 +1977,11 @@ class Tool(tk.Tk):
         sk = "time" if key == "time" else key
         for c, t in base.items():
             mark = arrow if (c == sk or (c == "up" and sk == "time")) else ""
-            self.tree.heading(c, text=t + mark)
+            self.tree.heading(c, text=tr(t) + mark)
 
         for i, p in enumerate(ordered):
-            up, dn = local(p.aos), local(p.los)
+            tz = self.cur_tz()
+            up, dn = local(p.aos, tz), local(p.los, tz)
             mark = "✓" if id(p) in self.checked else " "
             tags = []
             if p.max_el >= 60:
@@ -1813,7 +1999,7 @@ class Tool(tk.Tk):
 
         hot = sum(1 for p in ps if p.max_el >= 60)
         self.lbl_status.config(
-            text=f"{len(ps)} 个过境 · {hot} 个 60°+", fg=DIM)
+            text=tr("{n} 个过境 · {hot} 个 60°+").format(n=len(ps), hot=hot), fg=DIM)
         if ordered:
             self.tree.selection_set("0")
             self.show_detail(ordered[0])
@@ -1850,38 +2036,43 @@ class Tool(tk.Tk):
             d.insert("end", f"{k}  ", "k")
             d.insert("end", f"{v}\n", tag)
 
-        tr = self.sel_trans()
-        down_mhz = tr.down_mhz if tr else self.sat.freq_mhz
-        up_mhz = tr.up_mhz if tr else (getattr(self.sat, "up_mhz", 0.0) or 0.0)
-        if tr:
+        tr0 = self.sel_trans()
+        down_mhz = tr0.down_mhz if tr0 else self.sat.freq_mhz
+        up_mhz = tr0.up_mhz if tr0 else (getattr(self.sat, "up_mhz", 0.0) or 0.0)
+        if tr0:
             # 选中条目自带哑音：SSTV 那条没有哑音，不能再回退去借中继的 67 Hz。
-            tone_txt = f"{tr.tone_hz:g} Hz" if tr.tone_hz else ""
+            tone_txt = f"{tr0.tone_hz:g} Hz" if tr0.tone_hz else ""
         else:
             tone_txt = self.sat.tone or ""
-        mode_txt = tr.name if tr else self.sat.mode
+        mode_txt = tr(tr0.name if tr0 else self.sat.mode)
         freq = down_mhz * 1e6 if self.sat.known else 145.8e6
-        up, tc, dn = local(p.aos), local(p.tca), local(p.los)
-        put("升起", f"{up.strftime('%m-%d %H:%M:%S')}   仰角 {max(0.0, p.aos_el):5.1f}°   方位 {p.aos_az:5.0f}°")
-        put("最高", f"{tc.strftime('%m-%d %H:%M:%S')}   仰角 {p.max_el:5.1f}°   方位 {p.tca_az:5.0f}°", "h")
-        put("落下", f"{dn.strftime('%m-%d %H:%M:%S')}   仰角 {max(0.0, p.los_el):5.1f}°   方位 {p.los_az:5.0f}°")
+        tz = self.cur_tz()
+        up, tc, dn = local(p.aos, tz), local(p.tca, tz), local(p.los, tz)
+        put(tr("升起"), tr("{t}   仰角 {el}°   方位 {az}°").format(
+            t=up.strftime('%m-%d %H:%M:%S'), el=f"{max(0.0, p.aos_el):5.1f}", az=f"{p.aos_az:5.0f}"))
+        put(tr("最高"), tr("{t}   仰角 {el}°   方位 {az}°").format(
+            t=tc.strftime('%m-%d %H:%M:%S'), el=f"{p.max_el:5.1f}", az=f"{p.tca_az:5.0f}"), "h")
+        put(tr("落下"), tr("{t}   仰角 {el}°   方位 {az}°").format(
+            t=dn.strftime('%m-%d %H:%M:%S'), el=f"{max(0.0, p.los_el):5.1f}", az=f"{p.los_az:5.0f}"))
         d.insert("end", "\n")
 
         lo, hi = p.span
-        put("直线距离", f"{p.tca_range:.0f} km   径向速度 {p.tca_rate:+.2f} km/s")
-        put("多普勒", f"{hi:+.0f} … {lo:+.0f} Hz   @ {freq/1e6:.4f} MHz", "o")
+        put(tr("直线距离"), tr("{r} km   径向速度 {v} km/s").format(
+            r=f"{p.tca_range:.0f}", v=f"{p.tca_rate:+.2f}"))
+        put(tr("多普勒"), f"{hi:+.0f} … {lo:+.0f} Hz   @ {freq/1e6:.4f} MHz", "o")
         sstv_hz = getattr(self.sat, "sstv_mhz", 0.0) or 0.0
         sstv_txt = (f"{sstv_hz:.3f} MHz {self.sat.sstv or ''}".strip()
                     if sstv_hz > 0 else (self.sat.sstv or "—"))
-        put("收发", f"{mode_txt} {down_mhz:.3f} MHz ↓ / "
-                    f"{up_mhz:.3f} MHz ↑"
-                    f"{(('  哑音 ' + tone_txt) if tone_txt else '')}")
+        put(tr("收发"), tr("{m} {d} MHz ↓ / {u} MHz ↑{tone}").format(
+            m=mode_txt, d=f"{down_mhz:.3f}", u=f"{up_mhz:.3f}",
+            tone=(tr("  哑音 {t}").format(t=tone_txt) if tone_txt else "")))
         vr = getattr(self.sat, "voice_rx_mhz", 0.0) or 0.0
         if vr > 0:
             vt = getattr(self.sat, "voice_tx_mhz", 0.0) or 0.0
-            put("语音", f"{vr:.3f} MHz ↓ / {vt:.3f} MHz ↑（欧洲上行 145.200）"
-                        f"   直通，不走中继")
-        put("SSTV", f"{sstv_txt}（只收）   APRS {self.sat.aprs or '—'}"
-                    f"{' MHz' if self.sat.aprs else ''}")
+            put(tr("语音"), tr("{v} MHz ↓ / {u} MHz ↑（欧洲上行 145.200）   直通，不走中继").format(
+                v=f"{vr:.3f}", u=f"{vt:.3f}"))
+        put("SSTV", tr("{s}（只收）   APRS {a}").format(
+            s=sstv_txt, a=f"{self.sat.aprs or '—'}{' MHz' if self.sat.aprs else ''}"))
 
         d.config(state="disabled")
 
@@ -1889,7 +2080,7 @@ class Tool(tk.Tk):
     def queue_add(self):
         sel = [p for p in self.rows if id(p) in self.checked]
         if not sel:
-            messagebox.showerror("待写", "先勾选过境")
+            messagebox.showerror(tr("待写"), tr("先勾选过境"))
             return
         sat = self.sat
         tr = self.sel_trans()
@@ -1924,25 +2115,25 @@ class Tool(tk.Tk):
             names[getattr(p, "name", "SAT")] = names.get(getattr(p, "name", "SAT"), 0) + 1
         parts = " ".join(f"{k}×{v}" for k, v in names.items())
         self.lbl_status.config(
-            text=f"待写 {len(self.queue)} 段：{parts}", fg=ACC)
+            text=tr("待写 {n} 段：{parts}").format(n=len(self.queue), parts=parts), fg=ACC)
 
     # --- write ------------------------------------------------------
     def write_radio(self):
         if self.busy:
             return
         if not self.sat.known:
-            messagebox.showerror("频率", "无下行频率：sat_freq.py 里补")
+            messagebox.showerror(tr("频率"), tr("无下行频率：sat_freq.py 里补"))
             return
         if not HAVE_SERIAL:
-            messagebox.showerror("串口", "没装 pyserial：pip install pyserial")
+            messagebox.showerror(tr("串口"), tr("没装 pyserial：pip install pyserial"))
             return
         port = self.cb_port.get().strip()
         if not port:
-            messagebox.showerror("串口", "先选串口")
+            messagebox.showerror(tr("串口"), tr("先选串口"))
             return
         sel = list(self.queue) if self.queue else [p for p in self.rows if id(p) in self.checked]
         if not sel:
-            messagebox.showerror("过境", "没勾选过境")
+            messagebox.showerror(tr("过境"), tr("没勾选过境"))
             return
         sel.sort(key=lambda q: q.aos)
 
@@ -1953,7 +2144,7 @@ class Tool(tk.Tk):
         # 去掉，并把具体去掉哪几趟摆给操作员看。
         if len(sel) > core.DPH_PASS_MAX:
             messagebox.showerror(
-                "过境", f"超过 {core.DPH_PASS_MAX} 条：条目区只放 {core.DPH_PASS_MAX} 条")
+                tr("过境"), tr("超过 {m} 条：条目区只放 {m} 条").format(m=core.DPH_PASS_MAX))
             return
         keep = core.fit_keep(sel)
         if keep < len(sel):
@@ -1963,14 +2154,14 @@ class Tool(tk.Tk):
                 f"    {q.aos.strftime('%m-%d %H:%M')}  {getattr(q, 'duration', 0)} s"
                 for q in drop[:6])
             if len(drop) > 6:
-                lines += f"\n    …… 还有 {len(drop) - 6} 趟"
-            msg = (f"这张表 {used:,} B，表区 {core.DPH_REGION:,} B，"
-                   f"超出 {used - core.DPH_REGION:,} B。\n\n"
-                   f"去掉最后 {len(drop)} 趟：剩 {len(sel) - len(drop)} 趟 / "
-                   f"{core.table_used(sel[:keep]):,} B\n"
-                   f"{lines}\n\n"
-                   f"去掉这 {len(drop)} 趟？")
-            if not messagebox.askyesno("表格超了", msg):
+                lines += "\n" + tr("…… 还有 {n} 趟").format(n=len(drop) - 6)
+            msg = tr("这张表 {used} B，表区 {cap} B，\n超出 {over} B。\n\n"
+                     "去掉最后 {d} 趟：剩 {left} 趟 / {fits} B\n{lines}\n\n"
+                     "去掉这 {d} 趟？").format(
+                used=f"{used:,}", cap=f"{core.DPH_REGION:,}", over=f"{used - core.DPH_REGION:,}",
+                d=len(drop), left=len(sel) - len(drop),
+                fits=f"{core.table_used(sel[:keep]):,}", lines=lines)
+            if not messagebox.askyesno(tr("表格超了"), msg):
                 return
             for q in drop:
                 self.checked.discard(id(q))
@@ -1979,10 +2170,10 @@ class Tool(tk.Tk):
             self.show_passes(self.passes)   # 树里的勾会跟着消掉
             sel = sel[:keep]
             self.lbl_status.config(
-                text=f"去掉 {len(drop)} 趟 · {len(sel)} 趟 "
-                     f"{core.table_used(sel):,} B", fg=ACC)
+                text=tr("去掉 {d} 趟 · {s} 趟 {b} B").format(
+                    d=len(drop), s=len(sel), b=f"{core.table_used(sel):,}"), fg=ACC)
             if not sel:
-                messagebox.showerror("过境", "一趟都装不下：调大间隔")
+                messagebox.showerror(tr("过境"), tr("一趟都装不下：调大间隔"))
                 return
 
         p = self.params()
@@ -1992,9 +2183,9 @@ class Tool(tk.Tk):
         try:
             # 上行/哑音也按选中的那条走：选 SSTV（无上行）时别把中继的 145.990
             # 和 67 Hz 一起写进表，选语音直通时也别写成中继的上行。
-            tr = self.sel_trans()
-            if tr:
-                up10, ctcss10 = tr.up10, tr.ctcss10
+            tr0 = self.sel_trans()
+            if tr0:
+                up10, ctcss10 = tr0.up10, tr0.ctcss10
             else:
                 up_mhz = getattr(self.sat, "up_mhz", 0.0) or 0.0
                 up_tone = getattr(self.sat, "up_tone", 0.0) or 0.0
@@ -2004,26 +2195,28 @@ class Tool(tk.Tk):
             for q in sel:
                 if not hasattr(q, "freq10"):
                     q.name = self.sat.name[:16]
-                    q.freq10 = tr.freq10 if tr else self.sat.freq10
+                    q.freq10 = tr0.freq10 if tr0 else self.sat.freq10
                     q.up10 = up10
                     q.ctcss10 = ctcss10
-                    q.trans_name = tr.name if tr else (self.sat.mode or "")
+                    q.trans_name = tr0.name if tr0 else (self.sat.mode or "")
 
             # 样点是按 recalc 那一刻的 step 算出来的；这里如果直接用输入框当前值，
             # 用户改完间隔没重新计算就写表 → 表里 step 字段和样点实际间隔不符，
             # 固件按错误步长外推，整条多普勒曲线时间轴翻倍。优先用样点自带的。
             step_ms = sel[0].step_ms if getattr(sel[0], "step_ms", None) else int(round(p[4] * 1000))
             if any(getattr(q, "step_ms", step_ms) != step_ms for q in sel):
-                messagebox.showwarning("采样间隔", "过境不是同一次算的，先点「计算」")
+                messagebox.showwarning(tr("采样间隔"), tr("过境不是同一次算的，先点「计算」"))
                 return
-            table = core.build_table(sel, tr.freq10 if tr else self.sat.freq10,
+            tz = self._tz_hours()
+            table = core.build_table(sel, tr0.freq10 if tr0 else self.sat.freq10,
                                      step_ms / 1000.0,
                                      name=self.sat.name[:16],
-                                     up10=up10, ctcss10=ctcss10)
+                                     up10=up10, ctcss10=ctcss10,
+                                     tz_hours=tz)
         except Exception as e:
             # 以前只接 ValueError：struct.error / 索引错 / 内存错全都会冒进
             # Tk 回调里被打包吞掉，表现是"按钮点了没反应，一个字节没写"。
-            messagebox.showerror("表格", f"{type(e).__name__}: {e}")
+            messagebox.showerror(tr("表格"), f"{type(e).__name__}: {e}")
             return
 
         # guard 之前裸写在 Tk 回调里：上一版 FLASH_VOICE_PACK 盖住了表区，
@@ -2042,7 +2235,7 @@ class Tool(tk.Tk):
             for i in range((len(table) + core.DPH_SECTOR - 1) // core.DPH_SECTOR):
                 core.guard(core.TABLE_START + i * core.DPH_SECTOR, core.DPH_SECTOR)
         except Exception as e:
-            messagebox.showerror("表格", f"地址自检失败，未写入：{e}")
+            messagebox.showerror(tr("表格"), tr("地址自检失败，未写入：{e}").format(e=e))
             return
 
         # 二次确认：这个按钮一按下去就是擦掉若干个扇区再重写表头，以前它和
@@ -2053,29 +2246,25 @@ class Tool(tk.Tk):
         # 写进去的是中继 437.800 还是 SSTV 437.550，选错了也不会有任何提示。
         heads = []
         for q in sel[:12]:
-            heads.append(
-                f"写入：{str(getattr(q, 'name', 'SAT')).strip()} · "
-                f"{q.freq10 / 1e6:.4f} MHz · "
-                f"{getattr(q, 'trans_name', '') or '—'} · "
-                f"{q.freq10:,}（10 Hz 单位）")
+            heads.append(tr("写入：{name} · {f} MHz · {t} · {h}（10 Hz 单位）").format(
+                name=str(getattr(q, 'name', 'SAT')).strip(),
+                f=f"{q.freq10 / 1e6:.4f}",
+                t=getattr(q, 'trans_name', '') or '—',
+                h=f"{q.freq10:,}"))
         if len(sel) > 12:
-            heads.append(f"…… 另有 {len(sel) - 12} 段，频率同上表")
+            heads.append(tr("…… 另有 {n} 段，频率同上表").format(n=len(sel) - 12))
         # 以前这里写的是 len(table) —— 那是**字节数**，184 段表会显示成
         # "写入 6328 段过境"，谁看了都以为算错了。段数是 len(sel)，字节数
         # 单独标出来；擦除量写"整块"，因为 erase_plan 就是恒擦满表区。
-        msg = (f"擦除 {len(sectors)} 扇区 / {len(sectors) * 4} KiB，"
-               f"写入 {len(sel)} 段 / {len(table):,} B\n"
-               f"卫星 {self.sat.name[:16]}    串口 {port}\n\n"
-               + "\n".join(heads) + "\n\n"
-               "原有表整块替换，过程中不要断电。\n\n"
-               "写入？")
+        msg = tr("擦除 {s} 扇区 / {k} KiB，写入 {n} 段 / {b} B\n卫星 {sat}    串口 {port}    时区 {tz}\n\n{heads}\n\n原有表整块替换，过程中不要断电。\n\n写入？").format(
+            s=len(sectors), k=len(sectors) * 4, n=len(sel), b=f"{len(table):,}",
+            sat=self.sat.name[:16], port=port, tz=tz_label(tz), heads="\n".join(heads))
         if self.var_unlock.get():
-            msg += ("\n\n已勾选「允许擦除表区」：先借擦除额度，"
-                    "整块清空后再写。不可恢复。")
+            msg += tr("\n\n已勾选「允许擦除表区」：先借擦除额度，整块清空后再写。不可恢复。")
         if warn:
-            msg = "注意：\n· " + "\n· ".join(warn) + "\n\n" + msg
-        if not messagebox.askyesno("写入电台 · 确认", msg, default="no"):
-            self.lbl_status.config(text="已取消", fg=DIM)
+            msg = tr("注意：\n· {w}\n\n{m}").format(w="\n· ".join(warn), m=msg)
+        if not messagebox.askyesno(tr("写入电台 · 确认"), msg, default="no"):
+            self.lbl_status.config(text=tr("已取消"), fg=DIM)
             return
 
         self.cfg["port"] = port
@@ -2084,24 +2273,24 @@ class Tool(tk.Tk):
         self.busy = True
         self.btn_write.config(state="disabled")
         threading.Thread(target=self._writer,
-                         args=(port, table, sectors, bool(self.var_unlock.get())),
+                         args=(port, table, sectors, bool(self.var_unlock.get()), tz),
                          daemon=True).start()
 
-    def _writer(self, port, table, sectors, allow_unlock=False):
+    def _writer(self, port, table, sectors, allow_unlock=False, tz_hours=None):
         notes = {}
         def tick(text, done, total):
             self.after(0, lambda: (self.prog.configure(value=100 * done / max(1, total)),
                                    self.lbl_status.config(text=text, fg=DIM)))
         try:
             st = radio_write(port, table, allow_unlock=allow_unlock,
-                             tick=tick, notes=notes)
+                             tick=tick, notes=notes, tz_hours=tz_hours)
             self.after(0, lambda: self.lbl_status.config(
-                text=f"✓ 完成 · {st['len']} 字节 · {st['sectors']} 扇区"
-                     f"{notes.get('fw', '')}", fg=ACC))
+                text=tr("✓ 完成 · {n} 字节 · {s} 扇区{fw}").format(
+                    n=st['len'], s=st['sectors'], fw=notes.get('fw', '')), fg=ACC))
         except Exception as e:
             msg = str(e)
             log_line("FAIL", msg.replace(chr(10), " / "))
-            self.after(0, lambda: self.lbl_status.config(text=f"✗ {msg}", fg="#d98a5a"))
+            self.after(0, lambda: self.lbl_status.config(text=tr("✗ {msg}").format(msg=msg), fg="#d98a5a"))
         finally:
             self.after(0, lambda: (setattr(self, "busy", False),
                                    self.btn_write.config(state="normal"),
@@ -2115,9 +2304,9 @@ if __name__ == "__main__":
     # 从没起来过，对方只需要把 logs\pc-*.log 发回来即可定位。
     import traceback
 
-    log_line("start", f"{APP_NAME} v{APP_VERSION} BG0FPJ · F4HWN SSTV"
-                      f" · 打包={getattr(sys, 'frozen', False)}"
-                      f" · py={sys.version.split()[0]} · 数据目录={DATA_DIR}")
+    log_line("start", tr("{app} v{v} BG0FPJ · F4HWN SSTV · 打包={frozen} · py={py} · 数据目录={dir}").format(
+        app=tr(APP_NAME), v=APP_VERSION, frozen=getattr(sys, 'frozen', False),
+        py=sys.version.split()[0], dir=DATA_DIR))
     # 任务栏按 AppUserModelID 认人：不给的话 Windows 把窗口归到 python.exe / 解包器
     # 名下，任务栏图标就退回默认那只。显式报一个身份，分组和图标都归自己。
     if sys.platform == "win32":
@@ -2126,7 +2315,7 @@ if __name__ == "__main__":
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                 "BG0FPJ.SimpleDoppler.PC")
         except Exception as e:
-            log_line("warn", f"AppUserModelID 设置失败：{e}")
+            log_line("warn", tr("AppUserModelID 设置失败：{e}").format(e=e))
     try:
         Tool().mainloop()
     except SystemExit:
