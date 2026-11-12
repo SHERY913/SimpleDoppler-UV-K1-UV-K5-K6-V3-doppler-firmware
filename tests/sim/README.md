@@ -14,9 +14,16 @@ bash tests/sim/build.sh s1         # 预听页 PTT 松手（交接-26 ①）
 bash tests/sim/build.sh s2         # 就绪页 PTT 松手（交接-26 ②）
 bash tests/sim/build.sh s3         # 进页顶功率、退页还原（交接-26 ③）
 bash tests/sim/build.sh s4         # 正面用例：整趟 600 s 过境 + 中途 PTT 30 s
-bash tests/sim/build.sh all        # s1 + s2 + s3
-bash tests/sim/build.sh script 脚本 [表]     # 逐行跑按键脚本，只打事件流
-bash tests/sim/negctl.sh 1|2|3     # 阳性对照：在副本上破坏一条修复，场景应变红
+bash tests/sim/build.sh s5         # 侧键一起发（E6/E7）
+bash tests/sim/build.sh s6         # 纯接收星上侧键二（E8）
+bash tests/sim/build.sh s7         # ▲▼ 改步进（E5/方向/钳位）
+bash tests/sim/build.sh s8         # 预听·尾音页 TX 频率（E4）
+bash tests/sim/build.sh s9         # 校准页写 ppm + 断电回读（B4/CRC）
+bash tests/sim/build.sh s10        # 音调键控：亚音必须早于 PA 落地（TONE-KEYUP）
+bash tests/sim/build.sh s11        # 长按 M 武装：到点自己进 RUN；武装不了必须双响拒绝（AUTO-ARM）
+bash tests/sim/build.sh all        # 两个静态守卫 + s1..s11 全跑（s11 会把时钟置真，必须排最后）
+bash tests/sim/build.sh script 脚本 [表]     # 逐行跑按键脚本，只打事件流（按键名必须写 KEY_0…KEY_9）
+bash tests/sim/negctl.sh 1..20     # 阳性对照：在副本上破坏一条修复，场景应变红（19/20 守 AUTO-ARM）
 ```
 
 宿主 C 编译器用 `zig cc`（本机没有 gcc/clang/MSVC）。zig 路径先读 `/tmp/zigpath`，

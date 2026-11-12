@@ -16,6 +16,12 @@
 #   bash tests/sim/negctl.sh 13       # 破坏 E9（真机第三轮）：步进/带宽改回"按过才画 3 秒"
 #   bash tests/sim/negctl.sh 14       # 破坏交接-31：就绪页 PTT 又准发（拆掉闸门 + 塞回准入）
 #   bash tests/sim/negctl.sh 15       # 破坏交接-31：RUN 的 ▲▼ 方向反回去（▲ 又变成往前）
+#   bash tests/sim/negctl.sh 16       # 破坏 CAL-CRC（交接-30 前置）：校准读回又恒为 0
+#   bash tests/sim/negctl.sh 17       # 破坏 TONE-KEYUP：删掉 PTT 按下时的 DPH_ToneApplyChip()
+#   bash tests/sim/negctl.sh 18       # 破坏 TONE-KEYUP：删掉 PTT 按下时的 DPH_GuardVfo()
+#   bash tests/sim/negctl.sh 19       # 破坏 AUTO-ARM：删掉长按 M 武装失败时的双响/NO ARM 拒绝反馈
+#   bash tests/sim/negctl.sh 20       # 破坏 AUTO-ARM：手机接管（ext_ctrl）时又允许偷偷武装
+#   bash tests/sim/negctl.sh 21       # 破坏 TONE-OFF：把“关”这一站从音环里去掉 → s12 必须红
 #
 # 关键：**固件源码一个字节都不改**。
 # 原因有二：硬约束 1（不改 固件源码/ 任何一行）与仓库里已有未提交改动
@@ -28,7 +34,7 @@ ROOT="$(cd "$SIM/../.." && pwd)"
 APP="$ROOT/固件源码/uvk1-v6.3.0/App"
 NEG="$SIM/out/neg"
 
-CTRL="${1:?用法: negctl.sh <1..15> [场景]}"
+CTRL="${1:?用法: negctl.sh <1..21> [场景]}"
 SCEN="${2:-}"
 
 mkdir -p "$NEG"
@@ -250,6 +256,76 @@ elif ctrl == '15':
     s = s.replace(old, "    int32_t dir = (Key == KEY_UP) ? 1 : -1;   /* [NEG-CTRL-15] */")
     what = '把 ▲▼ 的方向反回去（▲ 又变成往前推时间轴）'
 
+elif ctrl == '16':
+    # 破坏 CAL-CRC（交接-30 的前置修复）：DPH_LoadCal 的校验一律又覆盖到 crc
+    # 自己 —— 写入侧算的是 crc=0，读出侧 crc 已经有值，两边永远不相等，于是
+    # 每次进页都把 clk_ppm 清 0。s9 的"断电重读仍是 +76"必须变红。
+    old = "    if (c.crc != CRC_Calculate(&c, (uint16_t)offsetof(dph_cal_t, crc)))"
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old,
+        "    if (c.crc != CRC_Calculate(&c, (uint16_t)(sizeof(c) - sizeof(c.crc))))   /* [NEG-CTRL-16] */")
+    what = '把 DPH_LoadCal 的 CRC 口径改回"crc 也算进输入"（CAL-CRC：校准永远读不回来）'
+
+elif ctrl == '19':
+    # 破坏 AUTO-ARM 的拒绝反馈（现场报的"倒计时归零、页面不动、只能再短按一次 M"）：
+    # 长按 M 时如果 DPH_AosLeft() < 0（时钟不可信）或者表坏了导致 DPH_PreListen()
+    # 早退（phase 还停在 READY），武装根本置不上，而原来的代码全程静默 ——
+    # 预听页的倒计时照走，到零什么都不发生。s11 的 a 段必须变红。
+    old = ("            else\n"
+           "            {\n"
+           "                arm_refused_until = SCHEDULER_GetTick10ms() + 200u;   /* 2 s */\n"
+           "                gBeepToPlay    = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;\n"
+           "                gUpdateDisplay = true;\n"
+           "            }\n")
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old,
+                  "            else\n"
+                  "            {\n"
+                  "                /* [NEG-CTRL-19] 拒绝反馈被删掉，武装失败又变成静默 */\n"
+                  "            }\n")
+    what = '删掉长按 M 武装失败时的双响/NO ARM 反馈（又回到静默丢武装）'
+
+elif ctrl == '20':
+    # 破坏 AUTO-ARM 的第二道门：手机还占着 PLL（ext_ctrl）时不要把 armed 置真 ——
+    # 定时开始块是 `... && auto_armed && !ext_ctrl`，置真之后倒计时照走、到零不动，
+    # 而短按 M 在 ext_ctrl 下只闪 LOCK。s11 的 b 段必须变红。
+    old = "            if (phase == DPH_PRE && !ext_ctrl && DPH_AosLeft() >= 0)"
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old,
+                  "            if (phase == DPH_PRE && DPH_AosLeft() >= 0)   /* [NEG-CTRL-20] */")
+    what = '手机接管（ext_ctrl）时又允许偷偷武装（到点仍然跑不起来）'
+
+elif ctrl == '17':
+    # 破坏 TONE-KEYUP 的前一半：PTT 按下时不再把结构体里的亚音预写进芯片，
+    # 只剩 radio.c 那一次（而它读的是被甩回操作员信道的 gCurrentVfo）。
+    # s10 的"CTCSS 744 在 PA 之前落地"必须变红。
+    old = ("            DPH_GuardVfo();\n"
+           "            DPH_ToneApplyChip();\n")
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old,
+                  "            DPH_GuardVfo();\n"
+                  "            /* [NEG-CTRL-17] DPH_ToneApplyChip() 被删掉 */\n")
+    what = '删掉 PTT 按下时的 DPH_ToneApplyChip()（亚音不再早于 PA 落地）'
+
+elif ctrl == '18':
+    # 破坏 TONE-KEYUP 的后一半：按下 PTT 时不再抢回 VFO 指针，radio.c
+    # 按操作员信道写 67.0 —— s10 的"最后一次 CTCSS 仍是 744"必须变红。
+    old = ("            DPH_GuardVfo();\n"
+           "            DPH_ToneApplyChip();\n")
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old,
+                  "            /* [NEG-CTRL-18] DPH_GuardVfo() 被删掉 */\n"
+                  "            DPH_ToneApplyChip();\n")
+    what = '删掉 PTT 按下时的 DPH_GuardVfo()（指针留在操作员信道，写进 67.0）'
+
+elif ctrl == '21':
+    # 破坏 TONE-OFF：把“关”这一站从环里去掉（旧固件就是没有这一站）。
+    # s12 的“第 4 下 = 0（关）”与后两条序列断言必须变红。
+    old = '    ring[ring_n++] = 0u;                       /* "关"自己占一站，见上面注释 */\n'
+    assert s.count(old) == 1, s.count(old)
+    s = s.replace(old, '    /* [NEG-CTRL-21] 环里的“关”站被删掉 */\n')
+    what = '把“关”这一站从音环里删掉（141.3 之后直接跳表值，哑音关不掉）'
+
 else:
     raise SystemExit('未知对照编号：' + ctrl)
 
@@ -277,7 +353,18 @@ case "$CTRL" in
     13) RUN=("s7") ;;
     14) RUN=("s5") ;;
     15) RUN=("s7") ;;
+    16) RUN=("s9") ;;
+    17) RUN=("s10") ;;
+    18) RUN=("s10") ;;
+    19) RUN=("s11") ;;
+    20) RUN=("s11") ;;
+    21) RUN=("s12") ;;
 esac
-[ -n "$SCEN" ] && RUN=("$SCEN")
+# 注意：别写成 `[ -n "$SCEN" ] && RUN=("$SCEN")` —— MSYS bash 在 set -e 下
+# 会在这里直接退出（trace 到这一行就没了，后面 build.sh 一次都没跑）。1~15
+# 一直是靠"显式传场景名"才没暴露这个坑。
+if [ -n "$SCEN" ]; then
+    RUN=("$SCEN")
+fi
 
 SIM_OUT="$NEG" DOPPLER_SRC="$NEG/doppler.c" bash "$SIM/build.sh" "${RUN[0]}"

@@ -25,6 +25,7 @@ typedef enum {
     EV_FLASH,         /* a = 地址，b = 长度 */
     EV_RADIO,         /* a = 1 开始发射 / 0 结束发射 */
     EV_APP,           /* 其它（PTT 事件、GPIO 等） */
+    EV_PA,            /* a = 1 打开 PA（GPIO1_PIN29）/ 0 关闭；key-up 时序靠它定界 */
     EV_KIND_N
 } ev_kind_t;
 

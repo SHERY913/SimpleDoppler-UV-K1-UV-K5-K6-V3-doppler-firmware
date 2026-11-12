@@ -31,6 +31,7 @@
 #include "misc.h"
 #include "driver/st7565.h"      /* gFrameBuffer / FRAME_LINES / LCD_WIDTH */
 #include "ui/ui.h"
+#include "audio.h"              /* gBeepToPlay：s11 要断"拒绝时有没有响" */
 
 static int g_fail = 0;
 
@@ -1165,6 +1166,494 @@ static void scenario_s8(const char *table)
         ok("尾音页印出了上行频点（E4：page 8 的 TX $Y）");
 }
 
+/* 场景⑨（B4）：校准 ppm 真的落进 flash，断电重读不再被 CRC 清零
+ *
+ * 交接-30/31 修过一条 CAL-CRC：`sizeof(c) - sizeof(c.crc)` 把 crc 自己也当
+ * 输入，写入侧 0x0109、读出侧 0xABB0，于是**每次进页** DPH_LoadCal() 都判
+ * 失败、把 clk_ppm 清 0 —— 校准功能等于从来没生效过。这条只在真机上才看得
+ * 出来（PC 读不到 0x1FF000），所以这里把它变成一条可复现的断言：
+ *
+ *   ① 校准页走完一次完整流程（M 开始计数 → 顶 60 s → 输 00:01:01 → M），
+ *      1 s 误差 = 1e6/60 = 16666 ppm，必被 DPH_PPM_MAX(±76) 钳住 —— 也就是
+ *      说"能存进去的值只有 0 或 ±76"，这一点本身就是设计事实（doppler.h:116）。
+ *   ② 直接读 flash 0x1FF000：magic "DPC1" / version 1 / ppm 76。
+ *   ③ 重进页面（DPH_Enter → DPH_LoadCal）：ppm 仍是 76。以前这里恒为 0。
+ *   ④ 把 magic 打坏再重进：回到 0（守卫还在，不许把野数据当校准）。
+ *
+ * 真机侧 B4 只能看到 0x0772 的 ppm 字段，而且 PC 没有写 ppm 的协议 —— 所以
+ * "非零校准"这条路只能在仿真里走完，真机只做"写进去之后断电回读仍是非零"。
+ */
+static void scenario_s9(const char *table)
+{
+    const uint8_t *flash;
+    const char    *want = "DPC1";
+    uint8_t        ppm_field;
+    uint8_t        ver_field;
+    uint32_t       i;
+    bool           magic_ok = true;
+    uint8_t       *w;
+
+    if (prepare(table, OUTPUT_POWER_LOW1) == NULL)
+    {
+        fail("s9 需要表镜像");
+        return;
+    }
+
+    sim_note("场景⑨（B4）：校准 ppm 写 flash → 重进页面回读");
+
+    sim_mark("DOPPLER_Start");
+    DOPPLER_Start();
+    sim_run_ms(50);
+
+    check(DPH_PpmGet() == 0, "空 flash 上电：clk_ppm = 0（没有记录就是没校过）");
+
+    sim_mark("进校准页（就绪页按 9）");
+    key_tap(KEY_9);
+    sim_run_ms(50);
+
+    sim_mark("按 M 开始计数，顶满 60 s");
+    key_tap(KEY_MENU);
+    sim_run_ms(60000);
+
+    sim_mark("输入 00:01:01（真实 61 s，固件数到 60 s）→ 按 M 提交");
+    key_tap(KEY_0);
+    key_tap(KEY_0);
+    key_tap(KEY_0);
+    key_tap(KEY_1);
+    key_tap(KEY_0);
+    key_tap(KEY_1);
+    key_tap(KEY_MENU);
+    sim_run_ms(100);
+
+    printf("# 提交后 clk_ppm = %d（合法区间 ±76）\n", (int)DPH_PpmGet());
+    check(DPH_PpmGet() == DPH_PPM_MAX,
+          "1 s 误差 = 16666 ppm 被钳到 +76：校准页只能给出 0 或 ±76（设计事实）");
+
+    /* ② 直接看 flash：这一步是 sim 独有的能力（PC 读不到表区外） */
+    flash = sim_flash_const();
+    for (i = 0; i < 4u; i++)
+        if (flash[0x1FF000u + i] != (uint8_t)want[i])
+            magic_ok = false;
+    check(magic_ok, "0x1FF000 落盘了 magic \"DPC1\"（擦 + 写都成功，不是只在 RAM 里）");
+
+    ver_field = flash[0x1FF004u];
+    /* dph_cal_t 的布局（doppler.h:258）：magic[4] @0、version @4、填充 @5..7、
+     * ppm(int32, 小端) @8、crc(uint16) @12 —— offsetof(crc)==12 与
+     * DPH_LoadCal 里的 CRC 口径一致，所以 ppm 一定在 8..11。 */
+    ppm_field = (uint8_t)0;
+    printf("# flash 里 version = %u，ppm = %d（@8，小端）\n",
+           (unsigned)ver_field,
+           (int)(int32_t)((uint32_t)flash[0x1FF008u]
+                          | ((uint32_t)flash[0x1FF009u] << 8)
+                          | ((uint32_t)flash[0x1FF00Au] << 16)
+                          | ((uint32_t)flash[0x1FF00Bu] << 24)));
+    check(ver_field == 1u, "version 字段 = 1（DPH_CAL_VERSION）");
+    check((int32_t)((uint32_t)flash[0x1FF008u]
+                    | ((uint32_t)flash[0x1FF009u] << 8)
+                    | ((uint32_t)flash[0x1FF00Au] << 16)
+                    | ((uint32_t)flash[0x1FF00Bu] << 24)) == DPH_PPM_MAX,
+          "flash 里的 ppm 字段就是生效值 +76");
+
+    /* ③ 断电重读：DPH_Enter → DPH_LoadCal，正是 CAL-CRC 那条修复守的路径 */
+    sim_mark("重进页面（等价于断电重启后 DPH_LoadCal）");
+    DOPPLER_Start();
+    sim_run_ms(50);
+    printf("# 重进后 clk_ppm = %d\n", (int)DPH_PpmGet());
+    check(DPH_PpmGet() == DPH_PPM_MAX,
+          "断电重读后 ppm 仍是 +76（CAL-CRC：以前这里必回 0）");
+    check(DPH_PhaseGet() == 1u, "重进后停在就绪页（顺带守 DPH_Enter 的初值）");
+
+    /* ④ 守卫：magic 坏掉就必须当"没校过"，不能拿野数据去改晶振 */
+    sim_mark("打坏 magic 再重进（守卫）");
+    w = sim_flash_ptr();
+    w[0x1FF000u] = 0x00;
+    DOPPLER_Start();
+    sim_run_ms(50);
+    printf("# magic 打坏后 clk_ppm = %d\n", (int)DPH_PpmGet());
+    check(DPH_PpmGet() == 0, "magic 不符 → clk_ppm 归 0（野数据不许当校准）");
+}
+
+/* 场景⑩（TONE-KEYUP）：跟踪页侧键二换到 74.4 → 按 PTT，亚音必须先于 PA 落地。
+ *
+ * 真机症状：屏上 $Z 与 0x0775 都报 74.4，空中发的却是操作员信道那颗音（或者
+ * 根本没有音）。两条成因叠在一起：
+ *   ① app.c:2943 的 gFlagReconfigureVfos 在 :2959 的 gFlagPrepareTX **之前**跑，
+ *      RADIO_SelectVfos 把 gCurrentVfo 甩回 gEeprom.VfoInfo[]；radio.c:1194 于是
+ *      按操作员信道写 REG_51/REG_07，而不是 dph_vfo 上刚换上去的那颗；
+ *   ② key-up 之前 doppler.c 从没把结构体里的亚音写进芯片，全靠 radio.c 那两句。
+ * 断言只看事件流（不看屏幕、不看协议）：空中那颗音就是这两条事件的关系。
+ *   a) 一条 CTCSS(744 = 74.4 Hz) 出现在 PA(GPIO1_PIN29) 打开之前；
+ *   b) PA 打开之后最后一次落到芯片的 CTCSS 仍是 744；
+ *   c) 发射中 DOPPLER_ExtToneGet() == 744（0.1 Hz 单位；芯片回读真能反解）；
+ *   d) 发射中把芯片改成 67.0 → 0x0775 跟着变成 6700（真值读芯片）。
+ * s10 同时是 negctl 17/18 的被测场景。 */
+static void scenario_s10(const char *table)
+{
+    const sim_entry_t *e = prepare(table, OUTPUT_POWER_LOW1);
+    uint16_t tone_before, tone_after;
+    uint32_t ev_from;
+    int      i, i_pa = -1, i_pre = -1, i_last = -1;
+
+    if (e == NULL)
+    {
+        fail("s10 需要表镜像");
+        return;
+    }
+
+    printf("# 表项 0：%s  down=%u  up=%u  ctcss=%u\n",
+           e->name, (unsigned)e->freq10, (unsigned)e->up10, (unsigned)e->ctcss10);
+
+    sim_note("场景⑩（TONE-KEYUP）：侧键二换到 74.4 → 按 PTT，亚音必须先于 PA");
+
+    sim_mark("DOPPLER_Start");
+    DOPPLER_Start();
+    sim_run_ms(50);
+
+    sim_mark("短按 MENU 进跟踪页（只有 RUN 有 PTT 准入）");
+    key_tap(KEY_MENU);
+    sim_run_ms(100);
+    printf("# phase = %u（2=RUN）\n", (unsigned)DPH_PhaseGet());
+    if (DPH_PhaseGet() != 2u)
+    {
+        fail("s10 没能进跟踪页，测不到 TONE-KEYUP");
+        return;
+    }
+
+    /* 先在结构体上真换一次音（不是"本来就叫 74.4"的空转）：音环是
+     * {670, 744, 1413, 0}，从表值 744 出发要绕到 1413 再转回来。 */
+    tone_before = DOPPLER_ExtToneGet();
+    sim_mark("侧键二换音（离开 74.4）");
+    side2();
+    tone_after = DOPPLER_ExtToneGet();
+    printf("# 侧键二：%u → %u（10 Hz 单位）\n",
+           (unsigned)tone_before, (unsigned)tone_after);
+    check(tone_after != tone_before, "侧键二在跟踪页确实改了上行亚音");
+
+    for (i = 0; i < 5 && DOPPLER_ExtToneGet() != 744u; i++)
+        side2();
+    printf("# 绕回 74.4：现在是 %u\n", (unsigned)DOPPLER_ExtToneGet());
+    if (DOPPLER_ExtToneGet() != 744u)
+    {
+        fail("s10 绕不回 74.4 Hz（音环改了？）");
+        return;
+    }
+
+    /* 模拟 app.c:2943 → RADIO_SelectVfos：三个指针被甩回操作员信道，而那条
+     * 信道带 67.0（CTCSS_Options 第 0 档）。真机按下 PTT 那一刻就是这个现场。 */
+    sim_mark("模拟 app.c RADIO_SelectVfos：指针甩回操作员信道（67.0）");
+    gEeprom.VfoInfo[0].freq_config_TX.CodeType = CODE_TYPE_CONTINUOUS_TONE;
+    gEeprom.VfoInfo[0].freq_config_TX.Code     = 0u;
+    gRxVfo      = &gEeprom.VfoInfo[0];
+    gTxVfo      = &gEeprom.VfoInfo[0];
+    gCurrentVfo = &gEeprom.VfoInfo[0];
+
+    sim_mark("PTT 按下 100 ms");
+    ev_from = g_ev_n;
+    ptt_down(100);
+
+    for (i = (int)ev_from; i < (int)g_ev_n; i++)
+        if (g_ev[i].kind == EV_PA && g_ev[i].a == 1)
+        {
+            i_pa = i;
+            break;
+        }
+
+    printf("# PA 打开事件下标 = %d（窗口起点 %lu）\n", i_pa, (unsigned long)ev_from);
+    check(i_pa >= 0, "PTT 按下后 PA 被打开（key-up 走到了 radio.c:1186）");
+
+    if (i_pa >= 0)
+        for (i = (int)ev_from; i < i_pa; i++)
+            if (g_ev[i].kind == EV_CTCSS && g_ev[i].a == 744)
+                i_pre = i;
+
+    printf("# 74.4(744) 落地事件下标 = %d（必须 < PA 的 %d）\n", i_pre, i_pa);
+    check(i_pre >= 0 && i_pre < i_pa,
+          "CTCSS 74.4(744) 在 PA 打开之前落地（TONE-KEYUP：key-up 前预写亚音）");
+
+    for (i = (int)ev_from; i < (int)g_ev_n; i++)
+        if (g_ev[i].kind == EV_CTCSS)
+            i_last = i;
+
+    if (i_last >= 0)
+        printf("# 最后一次 CTCSS = %d（期望 744；670 = 写成了操作员信道那颗）\n",
+               (int)g_ev[i_last].a);
+
+    check(i_last >= 0 && g_ev[i_last].a == 744,
+          "PA 之后最后落到芯片的亚音仍是 74.4(744)（radio.c 自己那一遍也读对了 VFO）");
+
+    printf("# 芯片回读 ctcss10 = %u\n", (unsigned)g_chip.ctcss10);
+    check(gCurrentFunction == FUNCTION_TRANSMIT, "按 PTT 之后确实在发射");
+
+    printf("# 发射中 0x0775 报 %u\n", (unsigned)DOPPLER_ExtToneGet());
+    check(DOPPLER_ExtToneGet() == 744u,
+          "发射中 0x0775 报 74.4（读结构体：DPH_TxCssRead 里装的那颗）");
+
+    sim_mark("发射中把芯片改成 67.0（模拟别的路径直写 REG_51/REG_07）");
+    BK4819_SetCTCSSFrequency(670u);
+    printf("# 芯片被改后 0x0775 报 %u\n", (unsigned)DOPPLER_ExtToneGet());
+    check(DOPPLER_ExtToneGet() == 744u,
+          "芯片被别的路径改掉 0x0775 也不跟（老实现只报结构体，不读芯片）");
+
+    ptt_up(50);
+}
+
+/* 场景⑪（AUTO-ARM）：长按 M 武装之后，AOS 到了必须自己进 RUN
+ *
+ * 现场：操作员长按 M，屏幕倒计时走到 0，页面却停在预听/就绪页；必须再短按一次
+ * M 才开跑。倒计时是 `$R` 用 DPH_AosLeft() 独立画的，**和 auto_armed 无关**，
+ * 所以"看见倒计时归零"不能证明武装成功 —— 这一场把两件事分开断：
+ *   a) 时钟没校（DPH_AosLeft() == -1）：长按必须留痕（双响），且不得报 armed；
+ *   b) 时钟校好、AOS 在 +5 s（表项 aos 字段 = 10 s 本地日，*2 换算；时钟取 5 s）：长按 → PRE + armed(bit3)，到点自动进 RUN，
+ *      并且芯片被调到 AOS 样点（RX_FREQ），不需要第二次按键。
+ * 本场必须排在 all 的最后：它会把 clk_valid 置真，后面的场景再想要"未校时"
+ * 就回不去了（doppler.c 没有清 clk_valid 的入口）。 */
+static void scenario_s11(const char *table)
+{
+    const sim_entry_t *e = prepare(table, OUTPUT_POWER_LOW1);
+    uint32_t exp_aos, ev_mark;
+    int      i, idx;
+    uint8_t  st;
+
+    if (e == NULL)
+    {
+        fail("s11 需要表镜像");
+        return;
+    }
+
+    /* 表项 0：aos 字段 = 10 s 本地日（doppler.c 里 *_2 换算），过境日 9802。
+     * 所以 DOPPLER_SetClock(9802, 5) ⇒ DPH_AosDelta = +5 s。 */
+    exp_aos = (uint32_t)((int32_t)e->freq10 + hz2ten(flash_sample(e, 0)));
+
+    sim_note("场景⑪（AUTO-ARM）：武装必须到点真会跑，跑不了就必须当场出声");
+
+    /* ---- a) 时钟未设：长按 M 只能进预听，武装必须被"说出来"---- */
+    sim_mark("DOPPLER_Start（时钟未设，DPH_AosLeft 应为 -1）");
+    DOPPLER_Start();
+    sim_run_ms(50);
+    check(DPH_PhaseGet() == 1u, "时钟未设时也能进就绪页");
+
+    gBeepToPlay = BEEP_NONE;
+    sim_mark("长按 M 600 ms（时钟未设：能预听，但武装不了）");
+    key_hold(KEY_MENU, 600);
+
+    printf("# phase = %u（6=PRE）  ExtState=0x%02X  beep=%u\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)DOPPLER_ExtState(),
+           (unsigned)gBeepToPlay);
+    check(DPH_PhaseGet() == 6u, "长按 M 进了预听页（与时钟无关）");
+    check((DOPPLER_ExtState() & 0x08u) == 0u,
+          "时钟未设时不得谎报 auto_armed（bit3）");
+    check(gBeepToPlay == BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL,
+          "武装被拒时有双响（不能静默吞掉这次长按）");
+
+    sim_mark("EXIT ×2 退出页面");
+    key_tap(KEY_EXIT);
+    key_tap(KEY_EXIT);
+    check(DPH_PhaseGet() == 0u, "两次 EXIT 退回主界面");
+
+    /* ---- b) 手机还占着 PLL（ext_ctrl）时同样必须拒绝，不能偷偷挂上 ---- */
+    check(DOPPLER_SetClock(9802u, 5u), "DOPPLER_SetClock 接受这组时间");
+    sim_mark("DOPPLER_Start（校时后，AOS 在 +5 s）");
+    DOPPLER_Start();
+    sim_run_ms(50);
+    check(DPH_PhaseGet() == 1u, "校时后进页停在就绪页");
+
+    sim_mark("DOPPLER_SetExtControl(true)：手机接管（没推第二套页面）");
+    gSerialConfigCountDown_500ms = 200u;      /* 串口活着，别让看门狗当掉线 */
+    check(DOPPLER_SetExtControl(true), "接管被接受");
+    printf("# 接管后 phase = %u（1=READY）  ExtState=0x%02X\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)DOPPLER_ExtState());
+
+    gBeepToPlay = BEEP_NONE;
+    sim_mark("接管中长按 M 600 ms：必须双响拒绝，不得置 auto_armed");
+    key_hold(KEY_MENU, 600);
+    st = DOPPLER_ExtState();
+    printf("# 接管中长按后 phase = %u  ExtState=0x%02X  beep=%u\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)st, (unsigned)gBeepToPlay);
+    check((st & 0x08u) == 0u, "手机接管时不得谎报武装（bit3）");
+    check(gBeepToPlay == BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL,
+          "手机接管时武装被拒要双响（不能偷偷挂上）");
+
+    if (DPH_PhaseGet() == 6u)
+    {
+        key_tap(KEY_EXIT);                    /* 预听 → 就绪 */
+    }
+    sim_mark("交还控制权并退页");
+    DOPPLER_SetExtControl(false);
+    key_tap(KEY_EXIT);
+    gSerialConfigCountDown_500ms = 0u;
+    printf("# phase = %u（0=OFF）\n", (unsigned)DPH_PhaseGet());
+    check(DPH_PhaseGet() == 0u, "交还后两次 EXIT 回到主界面");
+
+    /* ---- c) 时钟可信、没人抢：到 AOS 必须自己进 RUN ---- */
+    /* 重新校时：前面的 a/b 段已经吃掉几秒，AOS 必须从现在算起（1 s ⇒ +9 s）。 */
+    check(DOPPLER_SetClock(9802u, 1u), "重新校时（AOS 在 +9 s）");
+    sim_mark("DOPPLER_Start（校时，AOS 在 +9 s）");
+    DOPPLER_Start();
+    sim_run_ms(50);
+    check(DPH_PhaseGet() == 1u, "重新进页停在就绪页");
+
+    gBeepToPlay = BEEP_NONE;
+    sim_mark("长按 M 600 ms → 预听 + 武装");
+    key_hold(KEY_MENU, 600);
+    st = DOPPLER_ExtState();
+    printf("# phase = %u（6=PRE）  ExtState=0x%02X（bit3=armed）  beep=%u\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)st, (unsigned)gBeepToPlay);
+    check(DPH_PhaseGet() == 6u, "长按 M 落在预听页");
+    check((st & 0x08u) != 0u, "长按 M 之后 auto_armed 置真（bit3）");
+
+    sim_mark("推进 4 s（AOS 前）：仍应停在预听页");
+    sim_run_ms(4000);
+    printf("# AOS 前 phase = %u（6=PRE）  ExtState=0x%02X\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)DOPPLER_ExtState());
+    check(DPH_PhaseGet() == 6u, "AOS 前 5 s 仍停在预听页（没有提前开跑）");
+    check((DOPPLER_ExtState() & 0x08u) != 0u, "倒计时途中武装位仍然在");
+
+    sim_mark("再推进到 AOS 之后（每拍 10 ms，最多 6 s）");
+    ev_mark = g_ev_n;
+    for (i = 0; i < 600 && DPH_PhaseGet() != 2u; i++)
+        sim_run_ms(10);
+
+    printf("# AOS 后 phase = %u（2=RUN 6=PRE）  芯片 = %u（AOS 样点 %u）\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)g_chip.freq10, (unsigned)exp_aos);
+    check(DPH_PhaseGet() == 2u,
+          "AOS 倒计时归零后自动进跟踪页（不需要再短按 M）");
+
+    if (DPH_PhaseGet() == 2u)
+    {
+        sim_run_ms(50);
+        idx = sim_find(EV_RX_FREQ, ev_mark);
+        if (idx < 0)
+            fail("自动开跑后没有任何 RX_FREQ 事件（没换到 AOS 样点）");
+        else
+            printf("# 自动开跑后的第一条 RX_FREQ = %ld（AOS 样点 %u）\n",
+                   (long)g_ev[idx].a, (unsigned)exp_aos);
+
+        check((int32_t)g_chip.freq10 - (int32_t)exp_aos <= 200
+              && (int32_t)g_chip.freq10 - (int32_t)exp_aos >= -200,
+              "自动开跑后芯片被调到 AOS 样点附近（±2 kHz）");
+    }
+}
+
+/* ---------------- 交接-32：侧键二的“关”站（只验音环） ---------------- */
+
+/* 就绪页 $Z 的右对齐起点 = 版面 x(127) - 4 px × 字符数。
+ * 字符步进 4 px（doppler.c:4260 DPH_TextWidth，font 2 → DPH_SMALL_STEP），
+ * 所以这个列号就等于“屏上印了几个字符”：
+ *   "T88.5" / "T74.4" / "T67.0" 5 字符 → 107
+ *   "T141.3"                    6 字符 → 103
+ *   "T--"                       3 字符 → 115
+ * 仿真没有屏幕字符串，量列宽是唯一能分开“印了 5 个字符”和“印了 3 个字符”
+ * 的口径。$Z 这一格现在只有这两种形态（DCS 只在 DCS 信道上出现）。
+ * UI_DisplayClear 在仿真里是空桩（sim_hw.c:546），帧缓冲只加不减：每次量之前
+ * 自己清一遍，等于模拟真机清屏，否则上一帧的像素会把起点往左拉。 */
+static int first_lit_col(uint8_t x0, uint8_t x1, uint8_t y0, uint8_t y1)
+{
+    uint8_t x, y;
+
+    for (x = x0; x <= x1; x++)
+        for (y = y0; y <= y1; y++)
+            if ((gFrameBuffer[y >> 3][x] >> (y & 7u)) & 1u)
+                return (int)x;
+
+    return -1;
+}
+
+/* 画一帧就绪页，断言 $Z 的起点列与 want 的字符数一致。 */
+static void s12_z(const char *want, const char *what)
+{
+    int col;
+    int exp = 127 - 4 * (int)strlen(want);
+
+    memset(gFrameBuffer, 0, sizeof(gFrameBuffer));
+    UI_DisplayDoppler();
+    col = first_lit_col(88, 127, 21, 28);
+    printf("# %s：$Z 起点 = %d（\"%s\" → 期望 %d）\n", what, col, want, exp);
+    check(col == exp, what);
+}
+
+/* 场景⑫（TONE-OFF）：侧键二的环里必须有“关”这一站，而且“关”之后按需接
+ * 第 5 站（表值）。断言只看环本身 —— 芯片真值那套（T?? / T? / 闪烁）已撤，
+ * $Z 回到“读结构体”的老实现，环是这一场唯一的主体。
+ *
+ *   670 → 744 → 1413 → 关(0) → 表值(非 0 且不在环里时) → 670
+ * 表值本身在环里（或为 0）时不加第 5 站，环是 4 项、关之后直接回 67.0。
+ * negctl.sh 21 把“关”这一站删掉，这一场必须红。 */
+static void scenario_s12(const char *table)
+{
+    const sim_entry_t *e;
+    sim_entry_t        t0;
+    sim_entry_t       *fp;
+    /* 表值 885（不在环里）→ 5 项环。885 是环里第 5 站，所以第一下从 885
+     * 落到环首 67.0，之后才是 74.4 → 141.3 → 关 → 885。 */
+    static const char *z885[5] = { "T67.0", "T74.4", "T141.3", "T--", "T88.5" };
+    /* 表值 670（本来就在环里）→ 4 项环，关之后直接回 67.0。 */
+    static const char *z670[3] = { "T74.4", "T141.3", "T--" };
+    char               msg[160];
+    int                i;
+
+    e = prepare(table, OUTPUT_POWER_LOW1);
+    if (e == NULL)
+    {
+        fail("s12 需要表镜像");
+        return;
+    }
+
+    /* 条目 0 的表值改成 885（不在 670/744/1413 里）→ 环 5 项；
+     * 条目 1 的表值改成 670（本来就在环里）→ 环仍 4 项。
+     * 为什么改镜像而不动 data/table_sim.bin：那张表是 s1..s11 的共同基线
+     * （它们按“条目 0 = 744”写断言），在本场景的闪存副本上改字段最省事，
+     * 每次 prepare 都重新 load，不会漏给下一场。 */
+    fp = (sim_entry_t *)(sim_flash_ptr() + 0x162010u);
+    fp[0].ctcss10 = 885u;
+    fp[1].ctcss10 = 670u;
+    flash_entry(0, &t0);
+    printf("# 本场把表项 0 的 ctcss 改成 %u（不在环里 → 5 项环），表项 1 改成 670\n",
+           (unsigned)t0.ctcss10);
+
+    sim_note("场景⑫（TONE-OFF）：音环 670 → 744 → 1413 → 关 → 表值");
+
+    sim_mark("DOPPLER_Start");
+    DOPPLER_Start();
+    sim_run_ms(50);
+    printf("# 进页后 phase = %u  $Z = %u（表值）\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)DOPPLER_ExtToneGet());
+    check(DPH_PhaseGet() == 1u, "s12 停在就绪页");
+    check(DOPPLER_ExtToneGet() == 885u, "进页时结构体装的就是表值 885");
+    s12_z("T88.5", "进页时 $Z 印表值 T88.5");
+
+    for (i = 0; i < 5; i++)
+    {
+        side2();
+        snprintf(msg, sizeof(msg), "表值 885 第 %d 下：$Z = %s", i + 1, z885[i]);
+        printf("# 实际 tone = %u\n", (unsigned)DOPPLER_ExtToneGet());
+        check(DPH_PhaseGet() == 1u, "侧键二不换页");
+        s12_z(z885[i], msg);
+    }
+
+    /* ▼ 换到条目 1：表值 670 本来就在环里，不加第 5 站。 */
+    sim_note("表值 670 的条目（条目 1）：环 4 项，关之后直接回 670");
+    key_tap(KEY_DOWN);
+    printf("# ▼ 之后 phase = %u  $Z = %u\n",
+           (unsigned)DPH_PhaseGet(), (unsigned)DOPPLER_ExtToneGet());
+    check(DPH_PhaseGet() == 1u, "▼ 之后仍在就绪页");
+    check(DOPPLER_ExtToneGet() == 670u, "切到表值 670 的条目，结构体装的是 670");
+    s12_z("T67.0", "切条目后 $Z 印 T67.0");
+
+    for (i = 0; i < 3; i++)
+    {
+        side2();
+        snprintf(msg, sizeof(msg), "表值 670 第 %d 下：$Z = %s", i + 1, z670[i]);
+        printf("# 实际 tone = %u\n", (unsigned)DOPPLER_ExtToneGet());
+        s12_z(z670[i], msg);
+    }
+
+    /* 第 4 下：关之后直接回 670（表值在环里 → 没有第 5 站）。 */
+    side2();
+    printf("# 表值 670 第 4 下：$Z = %u\n", (unsigned)DOPPLER_ExtToneGet());
+    check(DOPPLER_ExtToneGet() == 670u, "表值 670 在环里 → 关之后直接回 670");
+    s12_z("T67.0", "第 4 下回到 T67.0（4 项环闭合，没有第 5 站）");
+}
+
 int main(int argc, char **argv)
 {
     const char *scn   = (argc > 1) ? argv[1] : "m0";
@@ -1230,6 +1719,22 @@ int main(int argc, char **argv)
     {
         scenario_s8(table);
     }
+    else if (strcmp(scn, "s9") == 0)
+    {
+        scenario_s9(table);
+    }
+    else if (strcmp(scn, "s10") == 0)
+    {
+        scenario_s10(table);
+    }
+    else if (strcmp(scn, "s11") == 0)
+    {
+        scenario_s11(table);
+    }
+    else if (strcmp(scn, "s12") == 0)
+    {
+        scenario_s12(table);
+    }
     else if (strcmp(scn, "all") == 0)
     {
         scenario_s1(table);
@@ -1245,6 +1750,14 @@ int main(int argc, char **argv)
         scenario_s7(table);
         printf("\n");
         scenario_s8(table);
+        printf("\n");
+        scenario_s9(table);
+        printf("\n");
+        scenario_s10(table);
+        printf("\n");
+        scenario_s12(table);
+        printf("\n");
+        scenario_s11(table);      /* 最后一场：它会把 clk_valid 置真 */
     }
     else
     {

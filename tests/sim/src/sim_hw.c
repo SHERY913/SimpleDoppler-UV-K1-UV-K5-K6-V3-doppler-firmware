@@ -60,6 +60,7 @@ const char *sim_ev_name(ev_kind_t k)
         case EV_FLASH:      return "FLASH";
         case EV_RADIO:      return "RADIO";
         case EV_APP:        return "APP";
+        case EV_PA:         return "PA";
         default:            return "?";
     }
 }
@@ -278,9 +279,21 @@ void BK4819_SetFrequency(uint32_t Frequency)
     sim_emit(g_ptt_intent ? EV_TX_FREQ : EV_RX_FREQ, (int32_t)Frequency, 0);
 }
 
+/* REG_51 / REG_07 的影子。桩不能只记 g_chip.ctcss10 —— 必须像 bk4829.c:546
+ * 那样把两个寄存器按同一公式落下来，SPI 回读才等于真机看到的东西
+ * （固件侧现在不读回、只写；影子留着，任何"别的路径直写 REG_51/07"都能被看见）。
+ *   REG_51：0x9040（1050 Hz 特例 0x9440）—— bit15 = Enable TxCTCSS，
+ *           bit12 = 1 表示 CTCSS 模式；
+ *   REG_07：MODE_CTC1 | freq(0.1 Hz) * 206488 / 100000，频率码在 <12:0>。
+ * ExitSubAu 只清 REG_51（REG_07 残留旧值，与 bk4829.c:1259 一致）。 */
+static uint16_t g_reg51;
+static uint16_t g_reg07;
 void BK4819_SetCTCSSFrequency(uint32_t BaudRate)
 {
     g_chip.ctcss10 = BaudRate;
+    g_reg51 = (BaudRate == 2625u) ? 0x9440u : 0x9040u;
+    g_reg07 = (uint16_t)(BK4819_REG_07_MODE_CTC1
+                         | (((BaudRate * 206488u) + 50000u) / 100000u));
     sim_emit(EV_CTCSS, (int32_t)BaudRate, 0);
 }
 
@@ -288,7 +301,31 @@ void BK4819_ExitSubAu(void)
 {
     g_chip.ctcss10     = 0u;
     g_chip.sub_au_exits++;
+    g_reg51            = 0x0000u;   /* REG_07 不清：与驱动 :1259 一致 */
     sim_emit(EV_CTCSS_OFF, 0, 0);
+}
+
+/* 寄存器回读：真机走 SPI 读，这里返回影子。没被写过的寄存器返回 0 ——
+ * 上电默认值未知，而 0 恰好等于"Enable 没开"，回读会如实报"没有亚音"。 */
+uint16_t BK4819_ReadRegister(BK4819_REGISTER_t Register)
+{
+    switch (Register)
+    {
+        case BK4819_REG_51:
+            return g_reg51;
+        case BK4819_REG_07:
+            return g_reg07;
+        default:
+            return 0u;
+    }
+}
+
+/* GPIO 输出：只有 PA 引脚进事件流（key-up 的时序断言靠它）。
+ * LNA 两只仍由 BK4819_IsGpioOutSet 读 g_chip，别在这里重复建模。 */
+void BK4819_ToggleGpioOut(BK4819_GPIO_PIN_t Pin, bool bSet)
+{
+    if (Pin == BK4819_GPIO1_PIN29_PA_ENABLE)
+        sim_emit(EV_PA, bSet ? 1 : 0, 0);
 }
 
 void BK4819_SetupSquelch(uint8_t SquelchOpenRSSIThresh,
@@ -378,15 +415,51 @@ void APP_HandleEndTransmission(void) {}
 
 /* app.c 的 PTT 前端：真机这里会 RADIO_PrepareTX + FUNCTION_Select 并且等到
  * 载波真的起来。仿真是"立刻切功能、立刻发事件"——时序窗见报告里的边界一节。 */
+/* radio.c:1146 RADIO_SetTxParametersEx 的时序替身 —— 只搬与本页有关的两步，
+ * 顺序一模一样：
+ *   :1186 BK4819_ToggleGpioOut(GPIO1_PIN29_PA_ENABLE, fm)  先开 PA
+ *   :1194 switch (gCurrentVfo->pTX->CodeType)              再写亚音
+ * 两步缺一不可：TONE-KEYUP 的病因正是"这里读到的是操作员信道的 pTX"，
+ * 而断言要问的正是"亚音有没有抢在 PA 之前落地"。DCS 的码字桩没做，不进
+ * CTCSS 事件（本页断言只看 CTCSS）。
+ * 它读 gCurrentVfo、不读 dph_vfo —— 这是故障的另一半，别在这里"替固件修好"。 */
+static void sim_radio_tx_tone(void)
+{
+    const FREQ_Config_t *tx = (gCurrentVfo != NULL) ? gCurrentVfo->pTX : NULL;
+
+    if (tx == NULL)
+        return;
+
+    switch (tx->CodeType)
+    {
+        case CODE_TYPE_CONTINUOUS_TONE:
+            if (tx->Code < 50u)
+                BK4819_SetCTCSSFrequency(CTCSS_Options[tx->Code]);
+            break;
+
+        case CODE_TYPE_DIGITAL:
+        case CODE_TYPE_REVERSE_DIGITAL:
+            break;
+
+        case CODE_TYPE_OFF:
+        default:
+            BK4819_ExitSubAu();
+            break;
+    }
+}
+
 void GENERIC_Key_PTT(bool bKeyPressed)
 {
     if (bKeyPressed)
     {
+        BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
+        sim_radio_tx_tone();
         gCurrentFunction = FUNCTION_TRANSMIT;
         sim_emit(EV_RADIO, 1, 0);
     }
     else
     {
+        BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, false);
         gCurrentFunction = FUNCTION_RECEIVE;
         sim_emit(EV_RADIO, 0, 1);
     }
@@ -623,6 +696,9 @@ void sim_radio_init(uint32_t rx10, uint32_t tx10, uint8_t power)
     g_chip.vhf_lna   = false;
     g_chip.register_writes = 0u;
     g_chip.sub_au_exits    = 0u;
+
+    g_reg51 = 0u;                  /* 上电：Enable TxCTCSS 未开 */
+    g_reg07 = 0u;
 
     g_ev_n = 0u;
     sim_clock_reset();
