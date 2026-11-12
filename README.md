@@ -1,7 +1,7 @@
 
 # UV-K1 UV-K5/K6 V3 离线/有线多普勒固件
 
-基于F4HWN固件的一个自动多普勒偏移固件，用于业余卫星通联或UV段SSTV接收。本项目编程内容由AI编写，欢迎各位大佬批评指点！
+基于F4HWN固件的一个自动多普勒偏移固件，用于业余卫星通联或UV段SSTV接收。本项目编程内容由AI编写，欢迎各位大佬批评指点！支持中英双语
 <img width="1920" height="1013" alt="5" src="https://github.com/user-attachments/assets/7af596f6-f281-4aa7-af35-4a0ff32bbc14" />
 <img width="3024" height="4032" alt="1" src="https://github.com/user-attachments/assets/f412515d-a44d-49e6-9d56-9a2db5a36156" />
 <img width="3024" height="4032" alt="3" src="https://github.com/user-attachments/assets/414a0980-91f5-4b1c-98ad-fa7f93c22653" />
