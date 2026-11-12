@@ -37,8 +37,8 @@
 | 内存不冲突 |写表空间不与F4多系统以及白头佬汉化文件重叠|
 |64KB写表空间|一次写入几十次过境，支持不同卫星组合写入。（写表数量随不同过境数据而上下浮动）|
 
-##按键映射<img width="1800" height="1500" alt="按键映射" src="https://github.com/user-attachments/assets/9f9d5542-6c7d-4fea-b154-bfc2c954b9ad" />
-
+##按键映射<img width="2400" height="2340" alt="按键映射-中文" src="https://github.com/user-attachments/assets/9adf3072-63fc-4d37-80b1-fc8c42532d11" />
+<img width="2400" height="2340" alt="keymap-EN" src="https://github.com/user-attachments/assets/ede32535-7894-490a-a194-33ec91e6fc6d" />
 ## 编译
 
 固件（工具链 `arm-none-eabi`）：
