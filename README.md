@@ -3,10 +3,7 @@
 
 基于F4HWN固件的一个自动多普勒偏移固件，用于业余卫星通联或UV段SSTV接收。本项目编程内容由AI编写，欢迎各位大佬批评指点！支持中英双语
 <img width="1920" height="1013" alt="5" src="https://github.com/user-attachments/assets/7af596f6-f281-4aa7-af35-4a0ff32bbc14" />
-<img width="3024" height="4032" alt="1" src="https://github.com/user-attachments/assets/f412515d-a44d-49e6-9d56-9a2db5a36156" />
-<img width="3024" height="4032" alt="3" src="https://github.com/user-attachments/assets/414a0980-91f5-4b1c-98ad-fa7f93c22653" />
-<img width="1280" height="1707" alt="4" src="https://github.com/user-attachments/assets/1e76cb4b-d3e4-47a4-9464-a85f94430252" />
-<img width="3024" height="4032" alt="2 (1)" src="https://github.com/user-attachments/assets/ce359c17-816d-451d-9c26-6d8d858b6cc5" />
+
 ## 它解决什么
 
 我们都知道，在卫星通联以及SSTV中多普勒效应会降低通联质量以及图像清晰度，传统的五信道方式精度只能说勉强够用。而社区中大部分方案都是通过蓝牙以及USB连接，实测下来，会对电台灵敏度产生一定的影响。于是我便想到提前把卫星的过境数据写入外部FLASH中，在卫星过境时播放频偏，这样便能尽量减少来自手机的传导干扰或者是蓝牙模块的射频干扰，同时实现多普勒频偏。
@@ -85,3 +82,9 @@ python embed_transponders.py --check
 ## 许可
 
 固件部分基于 F4HWN 的 GPL 授权发布，本仓库同样以 GPL-3.0 发布。第三方来源与引用方式见 [CREDITS.md](CREDITS.md)。
+
+##基本界面展示
+<img width="3024" height="4032" alt="1" src="https://github.com/user-attachments/assets/f412515d-a44d-49e6-9d56-9a2db5a36156" />
+<img width="3024" height="4032" alt="3" src="https://github.com/user-attachments/assets/414a0980-91f5-4b1c-98ad-fa7f93c22653" />
+<img width="1280" height="1707" alt="4" src="https://github.com/user-attachments/assets/1e76cb4b-d3e4-47a4-9464-a85f94430252" />
+<img width="3024" height="4032" alt="2 (1)" src="https://github.com/user-attachments/assets/ce359c17-816d-451d-9c26-6d8d858b6cc5" />
