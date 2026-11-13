@@ -24,13 +24,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                      # …/多普勒
-AUDIT = os.path.join(ROOT, "_amsat_audit.json")
+_AUDIT_CANDIDATES = [os.path.join(HERE, "_amsat_audit.json"),
+                     os.path.join(ROOT, "_amsat_audit.json")]
+AUDIT = next((p for p in _AUDIT_CANDIDATES if os.path.exists(p)), _AUDIT_CANDIDATES[0])
 ALLOW = os.path.join(ROOT, "数据", "amateur_allow.json")
 
 PENDING_NOTE = (
-    "待操作员拍板的 20 颗（IO-86/LAPAN-A2、AO-129、KOSTKA、JAMX01、"
-    "RS83S/59S/66S/90S、BY70-4、EMISAR、Replicator-2、T.MicroSat-1、"
-    "Lilium-4、UNNE-1B、BY70-8、CAS-7C、CRAC-01、INCA-2、PARUS-T2、RIDU-Sat 1）"
+    "待操作员拍板的 15 颗（AO-129、JAMX01、RS59S/66S、BY70-4、EMISAR、"
+    "Replicator-2、T.MicroSat-1、UNNE-1B、BY70-8、CAS-7C、CRAC-01、INCA-2、"
+    "PARUS-T2、RIDU-Sat 1）；IO-86/KOSTKA/RS83S/RS90S/Lilium-4 已于 2026-11-13 拍板入表"
 )
 
 

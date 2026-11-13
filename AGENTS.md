@@ -45,6 +45,9 @@ cd 多普勒/PC工具/多普勒工具 && bash verify_all.sh --fast
 # i18n.set_language('en')；cfg["lang"] 持久化。星简介/中文星名是数据，英文模式
 # 星名自动用国际名，简介暂留中文（数据表翻译另议）。
 python 多普勒/PC工具/多普勒工具/verify_i18n.py
+# AMSAT 频点体检（只报告，一字节都不改数据）：抓六页频率 → 对齐 NORAD → 分六档
+# 输出 能补 / 已一致 / 漂移 / 缺星历 / 非业余段 / 别名歧义。--offline 用上次缓存页。
+python 多普勒/tools/fetch_amsat_freqs.py            # 报告落在 tools/_amsat_freqs_report.md
 # 假电台仿真（不需要硬件，不改固件源码）：m0 空表 / s1 预听松手 / s2 就绪松手
 #   / s3 功率还原 / s4 整趟 600 s / s1h 长按 M 进预听 / s5 侧键一起发 / s6 纯接收星侧键二
 #   / s7 ▲▼ 改步进 / s8 预听·尾音页 TX 频率 / all（all 先跑两个静态守卫再跑全部场景）
@@ -111,7 +114,17 @@ python -m PyInstaller --noconfirm --clean --distpath OUT/dist --workpath OUT/bui
   `tests/sim` **16 条阳性对照**（`negctl.sh 1..16`，破坏修复→场景必红）与 **check() 76 条断言**（`build.sh all`，含 s9 校准页/断电回读）；
   `check_layout_overlap.py`（版面像素级重叠 + 内容要求）与 `check_dispatch.py`
   （app.c 派发层三条结构约束，补 sim 编不到 app.c 的那个洞）已接进 `build.sh all`。
+- 防线（PC 侧，2026-11-13）：`verify_all.sh` 第 12 层 `verify_search.py` —— 41 条断言盯
+  模糊匹配（"RS 90"/"rs-90"/中文名/NORAD 都要命中）、盯分词各命中一处（"rs 90" 不许捞到
+  TDRS）、盯列表把 "LUCA (RS90S)" 砍成 "LUCA"、盯无频点星回填/落 145.800 占位值、
+  盯写表闸门退回 `if not self.sat.known`。五条破坏对照逐条红过（改回旧行为 → rc=1）。
 - 挂账：双键同按（操作员决定不修）、APK 1.5 写的表判 `BAD LAYOUT`、zip 内 bin 仍 `29b0684e…`、D5 未验证。
+- PC 侧防线（2026-11-13）：`verify_all.sh` 第 13 层 `verify_queue_refresh.py` —— 23 条断言盯
+  写表前按每条过境自己的星 + 转发器重取频率（队列里的 `freq10/up10/ctcss10` 是入队快照，
+  不重取就会永远写旧表）。阳性对照：挖掉调用 / 塞回 `if not hasattr(q, "freq10")` 各自 rc=1。
+- 数据（2026-11-13）：`数据/sat_freq.json` 95 → 110 颗（AMSAT 报告里 16 颗"能补"的，
+  去掉 QO-100 —— 2.4/10.489 GHz 超固件 29–1300 MHz 合法域）；AO-123 下行改 436.210；
+  `amateur_allow.json` keep 222 → 227。桌面 exe 已重打（md5 `fe022bf0…`，34,971,284 B）。
 
 ## 待办
 

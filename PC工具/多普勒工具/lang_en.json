@@ -57,6 +57,11 @@
   "✓ 完成 · {n} 字节 · {s} 扇区{fw}": "✓ Done · {n} bytes · {s} sectors{fw}",
   "✗ {msg}": "✗ {msg}",
   "频率未知": "Frequency unknown",
+  "手动填下行频点": "Type a downlink frequency",
+  "先填下行频点": "Type a downlink frequency first",
+  "手动": "Manual",
+  "搜索：名字/别名/NORAD": "Search: name / alias / NORAD",
+  "{n} 段没有下行频点。\n\n在这颗星的卡片里填「下行 MHz（标称）」，重算过境后再写。": "{n} entries have no downlink frequency.\n\nType it into \"Downlink MHz (nominal)\" on this satellite's card, recompute the passes, then write.",
   "上行 {m} MHz{t}": "Uplink {m} MHz{t}",
   " · 亚音 {t} Hz": " · Tone {t} Hz",
   "哑音 {t} Hz": "Tone {t} Hz",
@@ -289,5 +294,6 @@
   "手动": "Manual",
   "时区 {tz} · 手动": "Timezone {tz} · manual",
   "手动值无效，退回 {tz}": "Manual value invalid, using {tz}",
-  "手动：填 -12~14 的数字，如 5.5": "Manual: type a number -12..14, e.g. 5.5"
+  "手动：填 -12~14 的数字，如 5.5": "Manual: type a number -12..14, e.g. 5.5",
+  "写入用待写队列 {n} 段；{m} 段勾选未参与（要换请先清队列）": "Writing the {n} queued pass(es); {m} ticked pass(es) ignored (clear the queue to swap)", "这 {n} 段找不到对应的卫星，沿用原频率：\n\n{p}": "{n} pass(es) have no matching satellite; keeping their old frequency:\n\n{p}", "已按当前转发器刷新 {n} 段频率": "Refreshed the frequency of {n} pass(es) from its current transponder", "无哑音": "no tone"
 }

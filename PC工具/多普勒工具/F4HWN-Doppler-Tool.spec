@@ -8,7 +8,10 @@ a = Analysis(
     datas=[('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/sat_pics', 'sat_pics'),
            ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/app.ico', '.'),
            ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/ico', 'ico'),
-           ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/lang_en.json', '.')],
+           ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/PC工具/多普勒工具/lang_en.json', '.'),
+           # 默认视图那道"只显示业余星"的闸门读这份名单；不带进包，exe 里就
+           # 只能退回频点表那 106 颗，搜得到但摆不出来。
+           ('C:/Users/13766/Documents/deepseek-harness/default-workspace/多普勒/数据/amateur_allow.json', '.')],
     hiddenimports=['sgp4.api', 'serial', 'serial.tools.list_ports'],
     hookspath=[],
     hooksconfig={},

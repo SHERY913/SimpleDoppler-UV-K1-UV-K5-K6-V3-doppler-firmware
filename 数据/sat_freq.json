@@ -9,6 +9,131 @@
   ],
   "generated_by": "多普勒/PC工具/多普勒工具/gen_sat_freq.py",
   "sats": {
+    "7530": {
+      "name": "AO-7",
+      "down": 145.975,
+      "up": 432.15,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "1974 年发射，仍在工作的最老业余卫星。模式 B：上行 432.125~432.175，下行 145.975。只在日照期工作。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.975,
+          "up": 432.15,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "14129": {
+      "name": "AO-10",
+      "down": 145.825,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "老卫星，下行 145.825，姿态已失控，只在少数时候能听到信标。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "14781": {
+      "name": "UO-11",
+      "down": 145.825,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "遥测",
+      "blurb": "英国 UoSAT-2，145.825 发 1200bd 遥测信标，已失效。",
+      "transponders": [
+        {
+          "name": "遥测",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "20442": {
+      "name": "LO-19",
+      "down": 437.125,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "CW",
+      "blurb": "巴西立方星，437.125 上发 CW 信标。",
+      "transponders": [
+        {
+          "name": "CW",
+          "down": 437.125,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "22825": {
+      "name": "AO-27",
+      "down": 436.795,
+      "up": 145.85,
+      "tone": 0.0,
+      "mode": "FM",
+      "blurb": "FM 跨段：上行 145.850、下行 436.795，无哑音。发射窗口由卫星定时器控制。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 436.795,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "24278": {
+      "name": "FO-29",
+      "down": 435.8,
+      "up": 145.9,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "JAS-2（日本），线性转发器：上行 145.900~146.000，下行 435.800~435.900。信号强，适合练 SSB。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.8,
+          "up": 145.9,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
+    },
+    "25397": {
+      "name": "GO-32",
+      "down": 435.225,
+      "up": 145.85,
+      "tone": 0.0,
+      "mode": "FM",
+      "blurb": "TechSat-Gurwin，下行 435.225，数据/语音混合任务。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 435.225,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
     "25544": {
       "name": "ISS",
       "down": 437.8,
@@ -50,236 +175,6 @@
         }
       ]
     },
-    "7530": {
-      "name": "AO-7",
-      "down": 145.975,
-      "up": 432.15,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "1974 年发射，仍在工作的最老业余卫星。模式 B：上行 432.125~432.175，下行 145.975。只在日照期工作。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 145.975,
-          "up": 432.15,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "43017": {
-      "name": "AO-91",
-      "down": 145.96,
-      "up": 435.25,
-      "tone": 67.0,
-      "mode": "FM",
-      "blurb": "Fox-1B，FM 跨段：上行 435.250、下行 145.960，67 Hz。主要覆盖美洲。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 145.96,
-          "up": 435.25,
-          "tone": 67.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "27607": {
-      "name": "SO-50",
-      "down": 436.795,
-      "up": 145.85,
-      "tone": 74.4,
-      "mode": "FM",
-      "blurb": "沙特卫星。上行 145.850 先发 74.4 Hz 唤醒，唤醒后约 10 分钟可用；下行 436.795。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 436.795,
-          "up": 145.85,
-          "tone": 74.4,
-          "note": ""
-        }
-      ]
-    },
-    "24278": {
-      "name": "FO-29",
-      "down": 435.8,
-      "up": 145.9,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "JAS-2（日本），线性转发器：上行 145.900~146.000，下行 435.800~435.900。信号强，适合练 SSB。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 435.8,
-          "up": 145.9,
-          "tone": 0.0,
-          "note": ""
-        }
-      ]
-    },
-    "44909": {
-      "name": "RS-44",
-      "down": 435.61,
-      "up": 145.965,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "俄罗斯线性转发器，下行 435.610 附近，带宽较宽，欧洲与亚洲都能听到。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 435.61,
-          "up": 145.965,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "39444": {
-      "name": "AO-73",
-      "down": 145.95,
-      "up": 435.15,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "FUNcube-1，线性转发器：上行 435.130~435.150，下行 145.950。长期稳定工作。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 145.95,
-          "up": 435.15,
-          "tone": 0.0,
-          "note": ""
-        }
-      ]
-    },
-    "43770": {
-      "name": "AO-95",
-      "down": 145.92,
-      "up": 435.3,
-      "tone": 67.0,
-      "mode": "FM",
-      "blurb": "Fox-1Cliff，FM 跨段：上行 435.300、下行 145.920，67 Hz。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 145.92,
-          "up": 435.3,
-          "tone": 67.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "50466": {
-      "name": "XW-3 希望三号",
-      "down": 435.725,
-      "up": 145.85,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "中国希望三号（CAS-9），线性转发器，下行 435.725 附近。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 435.725,
-          "up": 145.85,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "43678": {
-      "name": "PO-101",
-      "down": 145.9,
-      "up": 437.5,
-      "tone": 141.3,
-      "mode": "FM",
-      "blurb": "DIWATA-2（菲律宾）。FM 跨段：下行 145.900、上行 437.500，哑音 141.3 Hz。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 145.9,
-          "up": 437.5,
-          "tone": 141.3,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "43803": {
-      "name": "JO-97 / JY1SAT",
-      "down": 145.855,
-      "up": 435.1,
-      "tone": 67.0,
-      "mode": "FM",
-      "blurb": "约旦 JY1SAT（= JO-97），FM 跨段：上行 435.100、下行 145.855，67 Hz。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 145.855,
-          "up": 435.1,
-          "tone": 67.0,
-          "note": ""
-        }
-      ]
-    },
-    "14129": {
-      "name": "AO-10",
-      "down": 145.825,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "老卫星，下行 145.825，姿态已失控，只在少数时候能听到信标。",
-      "transponders": [
-        {
-          "name": "SSB/CW",
-          "down": 145.825,
-          "up": 0.0,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "22825": {
-      "name": "AO-27",
-      "down": 436.795,
-      "up": 145.85,
-      "tone": 0.0,
-      "mode": "FM",
-      "blurb": "FM 跨段：上行 145.850、下行 436.795，无哑音。发射窗口由卫星定时器控制。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 436.795,
-          "up": 145.85,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "25397": {
-      "name": "GO-32",
-      "down": 435.225,
-      "up": 145.85,
-      "tone": 0.0,
-      "mode": "FM",
-      "blurb": "TechSat-Gurwin，下行 435.225，数据/语音混合任务。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 435.225,
-          "up": 145.85,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
     "26931": {
       "name": "NO-44 PCSAT",
       "down": 145.825,
@@ -297,23 +192,22 @@
         }
       ]
     },
-    "20442": {
-      "name": "LO-19",
-      "down": 437.125,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "CW",
-      "blurb": "巴西立方星，437.125 上发 CW 信标。",
+    "27607": {
+      "name": "SO-50",
+      "down": 436.795,
+      "up": 145.85,
+      "tone": 74.4,
+      "mode": "FM",
+      "blurb": "沙特卫星。上行 145.850 先发 74.4 Hz 唤醒，唤醒后约 10 分钟可用；下行 436.795。",
       "transponders": [
         {
-          "name": "CW",
-          "down": 437.125,
-          "up": 0.0,
-          "tone": 0.0,
+          "name": "FM",
+          "down": 436.795,
+          "up": 145.85,
+          "tone": 74.4,
           "note": ""
         }
-      ],
-      "_unverified": true
+      ]
     },
     "27844": {
       "name": "CO-55",
@@ -351,24 +245,6 @@
       ],
       "_unverified": true
     },
-    "28895": {
-      "name": "XI-V",
-      "down": 437.345,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "CW",
-      "blurb": "东京大学立方星，437.345 上发 CW 信标。",
-      "transponders": [
-        {
-          "name": "CW",
-          "down": 437.345,
-          "up": 0.0,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
     "27939": {
       "name": "HO-68",
       "down": 435.79,
@@ -387,53 +263,17 @@
       ],
       "_unverified": true
     },
-    "40967": {
-      "name": "AO-85",
-      "down": 145.98,
-      "up": 435.18,
-      "tone": 67.0,
-      "mode": "FM",
-      "blurb": "Fox-1A，FM 跨段：上行 435.170~435.180、下行 145.980，67 Hz。",
-      "transponders": [
-        {
-          "name": "FM",
-          "down": 145.98,
-          "up": 435.18,
-          "tone": 67.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "53109": {
-      "name": "IO-117 GreenCube",
-      "down": 435.31,
+    "28895": {
+      "name": "XI-V",
+      "down": 437.345,
       "up": 0.0,
       "tone": 0.0,
-      "mode": "SSB/CW",
-      "blurb": "意大利 GreenCube，435.310 上的数字转发器（收发同频），需要 9k6 数据模式。",
+      "mode": "CW",
+      "blurb": "东京大学立方星，437.345 上发 CW 信标。",
       "transponders": [
         {
-          "name": "SSB/CW",
-          "down": 435.31,
-          "up": 0.0,
-          "tone": 0.0,
-          "note": ""
-        }
-      ],
-      "_unverified": true
-    },
-    "14781": {
-      "name": "UO-11",
-      "down": 145.825,
-      "up": 0.0,
-      "tone": 0.0,
-      "mode": "遥测",
-      "blurb": "英国 UoSAT-2，145.825 发 1200bd 遥测信标，已失效。",
-      "transponders": [
-        {
-          "name": "遥测",
-          "down": 145.825,
+          "name": "CW",
+          "down": 437.345,
           "up": 0.0,
           "tone": 0.0,
           "note": ""
@@ -567,6 +407,23 @@
       ],
       "_unverified": true
     },
+    "39444": {
+      "name": "AO-73",
+      "down": 145.95,
+      "up": 435.15,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "FUNcube-1，线性转发器：上行 435.130~435.150，下行 145.950。长期稳定工作。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 145.95,
+          "up": 435.15,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
+    },
     "40908": {
       "name": "LILACSAT-2",
       "down": 437.2,
@@ -583,6 +440,55 @@
           "note": ""
         }
       ]
+    },
+    "40931": {
+      "name": "IO-86 (LAPAN-A2)",
+      "down": 145.88,
+      "up": 435.88,
+      "tone": 0.0,
+      "mode": "FM 中继",
+      "blurb": "印尼 LAPAN-A2，低倾角轨道。FM 转发器 下行 145.880 / 上行 435.880（AMSAT 把 88.5 Hz 标在 145.880 那一列，没确认是上行哑音，tone 记 0）；另有 APRS 145.825、SSDV 1k2 IL2P 145.880。",
+      "transponders": [
+        {
+          "name": "FM 中继",
+          "down": 145.88,
+          "up": 435.88,
+          "tone": 0.0,
+          "note": "88.5 Hz 归属未确认"
+        },
+        {
+          "name": "APRS",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "数字中继"
+        },
+        {
+          "name": "SSDV",
+          "down": 145.88,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "1k2 IL2P"
+        }
+      ]
+    },
+    "40967": {
+      "name": "AO-85",
+      "down": 145.98,
+      "up": 435.18,
+      "tone": 67.0,
+      "mode": "FM",
+      "blurb": "Fox-1A，FM 跨段：上行 435.170~435.180、下行 145.980，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.98,
+          "up": 435.18,
+          "tone": 67.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
     },
     "41603": {
       "name": "Lapan A3",
@@ -633,6 +539,24 @@
           "down": 435.95,
           "up": 0.0,
           "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "43017": {
+      "name": "AO-91",
+      "down": 145.96,
+      "up": 435.25,
+      "tone": 67.0,
+      "mode": "FM",
+      "blurb": "Fox-1B，FM 跨段：上行 435.250、下行 145.960，67 Hz。主要覆盖美洲。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.96,
+          "up": 435.25,
+          "tone": 67.0,
           "note": ""
         }
       ],
@@ -728,6 +652,24 @@
       ],
       "_unverified": true
     },
+    "43678": {
+      "name": "PO-101",
+      "down": 145.9,
+      "up": 437.5,
+      "tone": 141.3,
+      "mode": "FM",
+      "blurb": "DIWATA-2（菲律宾）。FM 跨段：下行 145.900、上行 437.500，哑音 141.3 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.9,
+          "up": 437.5,
+          "tone": 141.3,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
     "43758": {
       "name": "MinXSS-2",
       "down": 437.25,
@@ -741,6 +683,24 @@
           "down": 437.25,
           "up": 0.0,
           "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "43770": {
+      "name": "AO-95",
+      "down": 145.92,
+      "up": 435.3,
+      "tone": 67.0,
+      "mode": "FM",
+      "blurb": "Fox-1Cliff，FM 跨段：上行 435.300、下行 145.920，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.92,
+          "up": 435.3,
+          "tone": 67.0,
           "note": ""
         }
       ],
@@ -836,6 +796,23 @@
       ],
       "_unverified": true
     },
+    "43803": {
+      "name": "JO-97 / JY1SAT",
+      "down": 145.855,
+      "up": 435.1,
+      "tone": 67.0,
+      "mode": "FM",
+      "blurb": "约旦 JY1SAT（= JO-97），FM 跨段：上行 435.100、下行 145.855，67 Hz。",
+      "transponders": [
+        {
+          "name": "FM",
+          "down": 145.855,
+          "up": 435.1,
+          "tone": 67.0,
+          "note": ""
+        }
+      ]
+    },
     "43804": {
       "name": "Suomi 100",
       "down": 437.775,
@@ -902,6 +879,24 @@
           "name": "SSB/CW",
           "down": 145.915,
           "up": 435.27,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "44909": {
+      "name": "RS-44",
+      "down": 435.61,
+      "up": 145.965,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "俄罗斯线性转发器，下行 435.610 附近，带宽较宽，欧洲与亚洲都能听到。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.61,
+          "up": 145.965,
           "tone": 0.0,
           "note": ""
         }
@@ -998,6 +993,24 @@
       ],
       "_unverified": true
     },
+    "50466": {
+      "name": "XW-3 希望三号",
+      "down": 435.725,
+      "up": 145.85,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "中国希望三号（CAS-9），线性转发器，下行 435.725 附近。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.725,
+          "up": 145.85,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
     "52899": {
       "name": "SNUGLITE 2",
       "down": 436.49,
@@ -1009,6 +1022,24 @@
         {
           "name": "遥测",
           "down": 436.49,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ],
+      "_unverified": true
+    },
+    "53109": {
+      "name": "IO-117 GreenCube",
+      "down": 435.31,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "SSB/CW",
+      "blurb": "意大利 GreenCube，435.310 上的数字转发器（收发同频），需要 9k6 数据模式。",
+      "transponders": [
+        {
+          "name": "SSB/CW",
+          "down": 435.31,
           "up": 0.0,
           "tone": 0.0,
           "note": ""
@@ -1051,6 +1082,40 @@
       ],
       "_unverified": true
     },
+    "57180": {
+      "name": "RS58S (MONITOR-3)",
+      "down": 435.29,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-58S(Monitor-3)，435.290 发 SSTV Robot 36。",
+      "transponders": [
+        {
+          "name": "SSTV",
+          "down": 435.29,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "Robot 36"
+        }
+      ]
+    },
+    "57182": {
+      "name": "RS57S (MONITOR-4)",
+      "down": 436.08,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-57S(Monitor-4)，436.080 发 SSTV Robot 36。",
+      "transponders": [
+        {
+          "name": "SSTV",
+          "down": 436.08,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "Robot 36"
+        }
+      ]
+    },
     "57189": {
       "name": "RS-38S",
       "down": 437.825,
@@ -1065,6 +1130,23 @@
           "up": 0.0,
           "tone": 0.0,
           "note": ""
+        }
+      ]
+    },
+    "57203": {
+      "name": "RS27S (UTMN-2)",
+      "down": 436.125,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-27S(UTMN-2)，436.125 发 SSTV Robot 36。",
+      "transponders": [
+        {
+          "name": "SSTV",
+          "down": 436.125,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "Robot 36"
         }
       ]
     },
@@ -1157,15 +1239,15 @@
     },
     "61781": {
       "name": "AO-123",
-      "down": 435.4,
+      "down": 436.21,
       "up": 145.85,
       "tone": 0.0,
       "mode": "FM",
-      "blurb": "ASRTU-1，FM 转发器 435.400/145.850，9k6 遥测。",
+      "blurb": "ASRTU-1，FM 转发器 下行 436.210 / 上行 145.850，9k6 遥测。",
       "transponders": [
         {
           "name": "FM",
-          "down": 435.4,
+          "down": 436.21,
           "up": 145.85,
           "tone": 0.0,
           "note": ""
@@ -1404,6 +1486,74 @@
       ],
       "_unverified": true
     },
+    "64881": {
+      "name": "RS61S (239ALFEROV)",
+      "down": 436.27,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-61S(239Alferov)，436.270 发 SSDV，9k6 GFSK（Geoscan 制式）。",
+      "transponders": [
+        {
+          "name": "SSDV",
+          "down": 436.27,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 GFSK/Geoscan"
+        }
+      ]
+    },
+    "64890": {
+      "name": "RS92S2 (GEOSCAN-2)",
+      "down": 436.16,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-92S2(Geoscan-2)，436.160 发 SSDV，9k6 GFSK。",
+      "transponders": [
+        {
+          "name": "SSDV",
+          "down": 436.16,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 GFSK/Geoscan"
+        }
+      ]
+    },
+    "64891": {
+      "name": "RS92S5 (GEOSCAN-5)",
+      "down": 436.66,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-92S5(Geoscan-5)，436.660 发 SSDV，9k6 GFSK。",
+      "transponders": [
+        {
+          "name": "SSDV",
+          "down": 436.66,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 GFSK/Geoscan"
+        }
+      ]
+    },
+    "64892": {
+      "name": "RS92S4 (GEOSCAN-4)",
+      "down": 435.335,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-92S4(Geoscan-4)，435.335 发 SSDV，9k6 GFSK。",
+      "transponders": [
+        {
+          "name": "SSDV",
+          "down": 435.335,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 GFSK/Geoscan"
+        }
+      ]
+    },
     "66657": {
       "name": "SPIRONE",
       "down": 436.65,
@@ -1458,6 +1608,57 @@
       ],
       "_unverified": true
     },
+    "67279": {
+      "name": "HC1PX (GALAPAGOS-UTE-SWSU)",
+      "down": 437.05,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "厄瓜多尔加拉帕戈斯 1U，437.050 发 SSTV Robot 36；无转发器。",
+      "transponders": [
+        {
+          "name": "SSTV",
+          "down": 437.05,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "Robot 36"
+        }
+      ]
+    },
+    "67284": {
+      "name": "RS83S (LOBACHEVSKY)",
+      "down": 436.32,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-83S(Lobachevsky)，436.320 发 SSTV 与 SSDV。",
+      "transponders": [
+        {
+          "name": "SSTV/SSDV",
+          "down": 436.32,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": ""
+        }
+      ]
+    },
+    "67287": {
+      "name": "RS90S (LUCA)",
+      "down": 437.18,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "图像/SSTV",
+      "blurb": "俄 RS-90S(Luca)，437.180 发 SSDV，2k4 GMSK。",
+      "transponders": [
+        {
+          "name": "SSDV",
+          "down": 437.18,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "2k4 GMSK"
+        }
+      ]
+    },
     "67290": {
       "name": "SAKHACUBE-CHOLBON",
       "down": 437.35,
@@ -1489,6 +1690,23 @@
           "up": 145.92,
           "tone": 67.0,
           "note": ""
+        }
+      ]
+    },
+    "67683": {
+      "name": "KNACKSAT-2",
+      "down": 145.825,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "数字中继",
+      "blurb": "泰国 1U，145.825 数字中继 9k6 FSK/APRS。",
+      "transponders": [
+        {
+          "name": "数字中继",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 FSK/APRS"
         }
       ]
     },
@@ -1596,6 +1814,23 @@
         }
       ],
       "_unverified": true
+    },
+    "68635": {
+      "name": "CANVAS",
+      "down": 437.25,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "数字中继",
+      "blurb": "AMSAT：437.250，AX.25 AFSK 1200 数字中继；2026-04-07 发射、待入轨，科学阶段结束后才开。",
+      "transponders": [
+        {
+          "name": "AFSK 1200 数字中继",
+          "down": 437.25,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "待入轨，尚未开启"
+        }
+      ]
     },
     "68792": {
       "name": "FSI-SAT 2",
@@ -1717,6 +1952,54 @@
           "up": 0.0,
           "tone": 0.0,
           "note": ""
+        }
+      ]
+    },
+    "69935": {
+      "name": "KOSTKA",
+      "down": 436.87,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "数字中继",
+      "blurb": "捷克 OK0KST，436.870 数字中继 9k6 GFSK/G3RUH。",
+      "transponders": [
+        {
+          "name": "数字中继",
+          "down": 436.87,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "9k6 GFSK/G3RUH"
+        }
+      ]
+    },
+    "71922": {
+      "name": "Lilium-4",
+      "down": 145.825,
+      "up": 0.0,
+      "tone": 0.0,
+      "mode": "数字中继",
+      "blurb": "2026-03-30 发射，呼号 BN0YCA，仍在测试；APRS 145.825，另有 145.980、435.250。",
+      "transponders": [
+        {
+          "name": "APRS",
+          "down": 145.825,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "测试中"
+        },
+        {
+          "name": "下行",
+          "down": 145.98,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "测试中"
+        },
+        {
+          "name": "下行",
+          "down": 435.25,
+          "up": 0.0,
+          "tone": 0.0,
+          "note": "测试中"
         }
       ]
     }

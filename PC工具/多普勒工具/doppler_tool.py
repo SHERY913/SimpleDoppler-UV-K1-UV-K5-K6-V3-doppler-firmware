@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -695,6 +696,228 @@ def radio_write(port, table, allow_unlock=False, tick=None, notes=None,
             link.close()
 
 
+# ------------------------------------------------------------------ 搜索与显示名
+# TLE 里这颗星叫 "LUCA (RS90S)"，操作员搜的是 "RS90"：名字砍成第一段就把
+# 业余编号砍没了，AMSAT 编号表里它又叫 RS90S。所以搜索键覆盖每一个别名段，
+# 显示名保留完整名字，放不下才退回第一段。
+_NAME_SEP = re.compile(r"[()/,]|·")
+_NONKEY = re.compile(r"[^0-9a-z\u4e00-\u9fff]")
+
+
+def name_parts(name):
+    """'LUCA (RS90S)' → ['LUCA', 'RS90S']；'JO-97 / JY1SAT' → ['JO-97', 'JY1SAT']。"""
+    return [p.strip() for p in _NAME_SEP.split(name or "") if p.strip()]
+
+
+def norm_key(text):
+    """搜索归一化：小写，丢掉空格与连字符 —— 'RS-44'、'rs 44'、'RS44' 同一个键。"""
+    return _NONKEY.sub("", str(text or "").lower())
+
+
+def name_keys(sat):
+    """一颗星的名字类搜索键：国际名、每个别名段、中文名（整串与分段）。"""
+    keys = {norm_key(sat.name)}
+    keys.update(norm_key(p) for p in name_parts(sat.name))
+    cn = sat_freq.CNNAME.get(sat.norad)
+    if cn:
+        keys.add(norm_key(cn))
+        keys.update(norm_key(p) for p in name_parts(cn))
+    return {k for k in keys if k}
+
+
+def sat_match(sat, query):
+    """模糊匹配。查询按空格切成词，这些词必须**一起出现在同一个键里**：
+    分开判会让 "rs 90" 命中 TDRS 11（NORAD 49013 里正好有 90）。
+    NORAD 只在整串查询时单独比，它是编号不是名字。"""
+    words = [w for w in (norm_key(x) for x in query.split()) if w]
+    if not words:
+        return True
+    if any(all(w in k for w in words) for k in name_keys(sat)):
+        return True
+    return len(words) == 1 and words[0] in norm_key(sat.norad)
+
+
+def wide_len(text):
+    """列宽按字符宽度算：汉字占两格。"""
+    return sum(2 if ord(c) > 127 else 1 for c in text)
+
+
+# 业余身份的唯一真源是 数据/amateur_allow.json（和 App/生成器共用同一份）。
+# exe 里这份文件不随包走，读不到就退回频点表 —— 默认视图少几颗，但不会空。
+_ALLOW_PATHS = [
+    os.path.normpath(os.path.join(DATA_DIR, os.pardir, os.pardir, "数据", "amateur_allow.json")),
+    os.path.normpath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, "数据", "amateur_allow.json")),
+    os.path.join(DATA_DIR, "amateur_allow.json"),
+    os.path.join(RES_DIR, "amateur_allow.json"),
+]
+
+
+def amateur_base_norads():
+    """白名单 keep 里的 NORAD，加上频点表收录的星和 EXTRA 名单。"""
+    out = set(sat_freq.FREQ) | set(sat_freq.EXTRA)
+    for p in _ALLOW_PATHS:
+        try:
+            with open(p, encoding="utf-8") as f:
+                keep = json.load(f).get("keep") or []
+            for e in keep:
+                try:
+                    out.add(int(e["norad"]))
+                except (TypeError, ValueError, KeyError):
+                    continue
+            break
+        except Exception:
+            continue
+    return out
+
+
+def merge_cached(sats, cache):
+    """把本地全量缓存里**没被联网结果覆盖**的星补进池子。
+
+    为什么必须并：celestrak 的 GROUP=amateur 只回 96 颗，**不含 67287
+    (RS90S)**；AMSAT 的 nasabare 是 97 颗，也不含它。这些星只活在本地的
+    tle_cache.json（15,985 条）里。以前联网分支直接 `sats = []` 重建，
+    点一次「更新 TLE」就把缓存池整个盖掉 —— 之后在 exe 里怎么模糊都搜不到
+    RS90S，而界面上明明写着"已更新"。
+
+    联网那份优先：同一个 NORAD 两边都有时，用联网的新星历，缓存只补缺。
+    返回新的列表，不改入参。
+    """
+    have = {s.norad for s in sats}
+    out = list(sats)
+    for norad_s, v in (cache or {}).items():
+        try:
+            norad = int(norad_s)
+        except Exception:
+            continue
+        if norad in have:
+            continue
+        try:
+            name, l1, l2 = v[0], v[1], v[2]
+        except Exception:
+            continue
+        st = core.Sat(norad, sat_freq.EXTRA.get(norad) or name, 145.800, "未知", "")
+        st.tle = (name, l1, l2)
+        if norad in sat_freq.EXTRA:
+            sat_freq.fill_extra(st)
+        else:
+            sat_freq.fill(st)
+        out.append(st)
+        have.add(norad)
+    return out
+
+
+def _trans_freqs(tr):
+    """一条转发器的 (freq10, up10, ctcss10)，10 Hz / 0.1 Hz 单位。"""
+    def pick(prop, mhz_attr, scale):
+        v = getattr(tr, prop, None)
+        if v is None:
+            v = float(getattr(tr, mhz_attr, 0.0) or 0.0) * scale
+        return int(round(float(v)))
+
+    c10 = getattr(tr, "ctcss10", None)
+    if c10 is None:
+        tone = getattr(tr, "tone_hz", None)
+        if tone is None:
+            tone = getattr(tr, "tone", 0.0) or 0.0
+        c10 = float(tone) * 10
+    return (pick("freq10", "down_mhz", 1e5),
+            pick("up10", "up_mhz", 1e5),
+            int(round(float(c10))))
+
+
+def match_transponder(sat, name):
+    """在这颗星上按名字找转发器：先精确，再忽略大小写/空白，最后比 label。"""
+    trs = list(getattr(sat, "transponders", None) or [])
+    key = str(name or "").strip()
+    if not key:
+        return None
+    for tr in trs:
+        if str(getattr(tr, "name", "")) == key:
+            return tr
+    low = key.lower()
+    for tr in trs:
+        if str(getattr(tr, "name", "")).strip().lower() == low:
+            return tr
+    for tr in trs:
+        if str(getattr(tr, "label", "")).strip().lower() == low:
+            return tr
+    # 最后一层宽松：只比字母数字（"RS 90"/"RS-90"/"rs90" 认为是同一条）。
+    # 数据里同一条转发器在 PC 与手机两端名字写法不一致时靠这条兜住。
+    squash = re.sub(r"[\s\-_]+", "", low)
+    if squash:
+        for tr in trs:
+            cand = re.sub(r"[\s\-_]+", "", str(getattr(tr, "name", "")).strip().lower())
+            if cand == squash:
+                return tr
+    return None
+
+
+def refresh_entry_freqs(sats, entries, current_sat=None):
+    """写表前，按每条过境自己的星 + 转发器重取一遍下行/上行/哑音。
+
+    为什么必须重取：待写队列里的条目是 `queue_add()` **那一刻**的快照
+    （`name/freq10/up10/ctcss10` 复制进去）。之后操作员在界面上换转发器、
+    改「下行 MHz」、甚至换一颗星，队列里那几条的数一个都不会跟着变，而
+    `write_radio()` 又优先用队列 —— 结果每次写进电台的都是第一次入队时的
+    那张表。现场表现就是"写什么频率，电台上都是同几趟、同一个频率"。
+
+    这里以星 + 转发器名为准重新算，队列只提供"哪一颗星、哪一条转发器"。
+    找不到星的条目保留原值并记进 `missing`，由调用方提示操作员。
+
+    返回 (changed, missing)：changed 是值真的变了的条数；missing 是找不到
+    对应卫星的条目描述（"星名 MM-DD HH:MM"）。
+    """
+    by_norad = {}
+    for st in sats or []:
+        try:
+            by_norad[int(getattr(st, "norad", 0) or 0)] = st
+        except (TypeError, ValueError):
+            continue
+
+    changed = 0
+    missing = []
+    for e in entries or []:
+        sat = None
+        try:
+            sat = by_norad.get(int(getattr(e, "norad", 0) or 0))
+        except (TypeError, ValueError):
+            sat = None
+        if sat is None and current_sat is not None:
+            if str(getattr(e, "name", "")) == str(getattr(current_sat, "name", ""))[:16]:
+                sat = current_sat
+        if sat is None:
+            when = getattr(e, "aos", None)
+            try:
+                stamp = when.strftime("%m-%d %H:%M") if when else ""
+            except Exception:
+                stamp = ""
+            missing.append(f"{str(getattr(e, 'name', '?'))[:16]} {stamp}".strip())
+            continue
+
+        tr = match_transponder(sat, getattr(e, "trans_name", None))
+        if tr is not None:
+            f10, u10, c10 = _trans_freqs(tr)
+            tname = str(getattr(tr, "name", "") or "")
+        else:
+            f10 = int(round(float(getattr(sat, "freq_mhz", 0.0) or 0.0) * 1e5))
+            u10 = int(round(float(getattr(sat, "up_mhz", 0.0) or 0.0) * 1e5))
+            c10 = int(round(float(getattr(sat, "up_tone", 0.0) or 0.0) * 10))
+            tname = str(getattr(sat, "mode", "") or "")
+        sname = str(getattr(sat, "name", ""))[:16]
+
+        before = (getattr(e, "name", None), getattr(e, "freq10", None),
+                  getattr(e, "up10", None), getattr(e, "ctcss10", None))
+        e.name = sname
+        e.freq10 = f10
+        e.up10 = u10
+        e.ctcss10 = c10
+        if tname:
+            e.trans_name = tname
+        if before != (e.name, e.freq10, e.up10, e.ctcss10):
+            changed += 1
+    return changed, missing
+
+
 class Tool(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -728,6 +951,10 @@ class Tool(tk.Tk):
         self.configure(bg=BG)
 
         self.sats = []            # Sat objects, favourites first
+        self._list = []           # fill_list 现在摆在列表里的那几行
+        self._am_base = None      # 业余身份 NORAD 集合（白名单 ∪ 频点表）
+        self.station_unset = False
+        self.np_err = []
         self.tle_at = 0.0
         self.tle_offline = False  # 以前只在 except 分支里才创建，命中缓存时反而炸
         self.tle_err = ""
@@ -874,11 +1101,14 @@ class Tool(tk.Tk):
                     pass
 
     def _render_count(self):
-        """左栏计数行：切语言时要按当前状态重画（set_sats/compute_next 也走这里）。"""
+        """左栏计数行：切语言时要按当前状态重画（set_sats/compute_next 也走这里）。
+        报的是"列表里现在摆了几行"，不是缓存里存了几条 TLE —— 后者写在下面那行。"""
+        n = len(self._list) if getattr(self, "_list", None) else sum(
+            1 for s in self.sats if s.norad in self._amateur_norads())
         if getattr(self, "station_unset", False):
-            self.lbl_count.config(text=tr("{n} 颗 未设台站").format(n=len(self.sats)))
+            self.lbl_count.config(text=tr("{n} 颗 未设台站").format(n=n))
         else:
-            self.lbl_count.config(text=tr("{n} 颗").format(n=len(self.sats)))
+            self.lbl_count.config(text=tr("{n} 颗").format(n=n))
 
     def _render_tle_line(self):
         """TLE 来源行：联网/缓存/离线三种说法，按当前状态重画。"""
@@ -1000,10 +1230,16 @@ class Tool(tk.Tk):
         self._lang_hooks.append(self._tz_row_refresh)
         self._tz_row_refresh()
 
+        self._tx(tk.Label(left, text="搜索：名字/别名/NORAD", bg=SIDE, fg=DIM,
+                          font=("Microsoft YaHei UI", 9), anchor="w"),
+                 "搜索：名字/别名/NORAD").pack(fill="x", padx=10, pady=(10, 2))
         self.e_search = tk.Entry(left, bg=CARD, fg=FG, bd=0, insertbackground=FG)
         self.e_search.pack(fill="x", padx=10, ipady=4)
         self.e_search.insert(0, "")
         self.e_search.bind("<KeyRelease>", lambda e: self.fill_list())
+        # Esc 清空重列：搜完想回到"只看业余星"那一屏，不用一段段删字。
+        self.e_search.bind("<Escape>", lambda e: (self.e_search.delete(0, "end"),
+                                                  self.fill_list()))
 
         sortrow = tk.Frame(left, bg=SIDE)
         sortrow.pack(fill="x", padx=10, pady=(6, 0))
@@ -1452,6 +1688,9 @@ class Tool(tk.Tk):
                     s.tle = (name, l1, l2)
                     sat_freq.fill_extra(s)
                     sats.append(s)
+                # 并池：联网那 96 颗盖不住缓存里的 15,985 条（RS90S 这类
+                # 只在本地缓存里的星全靠这一步留下来）。
+                sats = merge_cached(sats, self._tle_cache())
                 self.tle_at = time.time()
                 self.tle_offline = False
                 self._loaded = (sats, None)
@@ -1506,16 +1745,15 @@ class Tool(tk.Tk):
 
 
     def compute_next(self, redraw=True):
-        """Next pass for every satellite, vectorised SGP4 (95 sats in ~0.05 s).
+        """让"下次过境"这一列作废：台站一改，之前算的每一行都不再成立。
 
-        Called from a worker thread by set_sats(): building 96 Satrec objects
-        plus a 48 h scan is fast, but doing it inline still froze the window
-        for a moment on every TLE refresh."""
+        真正的计算挪进 fill_list 的 _fill_nextp —— 只算列表里现在摆着的几十行。
+        整份缓存全算一遍是 15984 次 48 h 扫描（≈8 s），默认视图却只有 228 行。
+        """
         # 台站没填就不算，也不假装算过。原来这里 float() 失败是静默 return，
         # 列表空着但一句提示都没有，新装上的人只会得出"这软件打不开数据"的结论。
         try:
-            g = core.Ground(float(self.cfg.get("lat", "")),
-                            float(self.cfg.get("lon", "")))
+            self._ground()
         except (TypeError, ValueError):
             self.nextp = {}
             self.station_unset = True
@@ -1527,26 +1765,40 @@ class Tool(tk.Tk):
                 self.fill_list()
             return
         self.station_unset = False
-        np_ = {}
+        self.nextp = {}
         self.np_err = []
-        for st in self.sats:
-            tle = getattr(st, "tle", None)
+        if redraw:
+            self.fill_list()
+
+    def _ground(self):
+        return core.Ground(float(self.cfg.get("lat", "")),
+                           float(self.cfg.get("lon", "")))
+
+    def _fill_nextp(self, items):
+        """给列表里这几行星补"下次过境"；算过的不重算（nextp 就是缓存）。"""
+        if self.station_unset:
+            return
+        try:
+            g = self._ground()
+        except (TypeError, ValueError):
+            return
+        for s in items:
+            if s.norad in self.nextp:
+                continue
+            tle = getattr(s, "tle", None)
             if not tle:
-                self.np_err.append((st.norad, "no tle"))
+                self.np_err.append((s.norad, "no tle"))
                 continue
             try:
                 sr = Satrec.twoline2rv(tle[1], tle[2])
                 r = core.next_pass_fast(sr, g, min_el=0.0, horizon_h=48.0)
             except Exception as e:
-                self.np_err.append((st.norad, repr(e)))
+                self.np_err.append((s.norad, repr(e)))
                 continue
             if r:
-                np_[st.norad] = r
+                self.nextp[s.norad] = r
             else:
-                self.np_err.append((st.norad, "no pass"))
-        self.nextp = np_
-        if redraw:
-            self.fill_list()
+                self.np_err.append((s.norad, "no pass"))
 
     def set_sats(self, sats, ok):
         self.group_ok = ok
@@ -1563,20 +1815,12 @@ class Tool(tk.Tk):
         # Two stages on purpose: the list is usable the instant it is drawn,
         # and the "next pass" column fills in a beat later instead of the
         # whole window sitting blank while 96 orbits are scanned.
+        self.compute_next(redraw=False)
         self.fill_list()
         want = self.cfg.get("norad", 25544)
         target = self.by_norad.get(want) or (sats[0] if sats else None)
         if target:
             self.select_sat(target)
-
-        def work():
-            try:
-                self.compute_next(redraw=False)
-            except Exception:
-                return
-            self.after(0, self.fill_list)
-
-        threading.Thread(target=work, daemon=True).start()
 
     def set_sort(self, key):
         self.list_sort = key
@@ -1595,29 +1839,52 @@ class Tool(tk.Tk):
         np_ = self.nextp.get(s.norad)
         return np_[0].timestamp() if np_ else 9e18
 
+    def _amateur_norads(self):
+        """默认视图的名单：白名单 ∪ 频点表 ∪ 手动填过频点的星 ∪ 收藏。
+        缓存里上千条商业星座靠这道闸挡在默认视图外，搜索时才放开。"""
+        if self._am_base is None:
+            self._am_base = amateur_base_norads()
+        try:
+            manual = {int(k) for k in (self.cfg.get("freq") or {})}
+        except (TypeError, ValueError):
+            manual = set()
+        return self._am_base | manual | set(self.cfg.get("fav", []))
+
     def _label(self, s, fav):
+        """列表里的名字：别名一起留着，放不下才退回第一段。
+        "LUCA (RS90S)" 砍成 "LUCA"，等于把操作员搜的那串业余编号砍没了 ——
+        行就在眼前，他以为这颗星没有。"""
+        full = (s.name or "").strip()
+        parts = name_parts(full)
+        short = parts[0] if parts else full
         cn = None if i18n.get_language() == "en" else sat_freq.CNNAME.get(s.norad)
         if cn:
-            short = s.name.split(" (")[0]
-            combo = f"{cn} · {short}"
-            wide = sum(2 if ord(c) > 127 else 1 for c in combo)
-            if short.upper() in cn.upper():
+            if norm_key(short) and norm_key(short) in norm_key(cn):
                 base = cn
+            elif wide_len(f"{cn} · {full}") <= 25:
+                base = f"{cn} · {full}"
             else:
-                base = combo if wide <= 25 else cn
+                base = cn
         else:
-            base = s.name.split(" (")[0]
+            base = full if wide_len(full) <= 25 else short
+        # 列只有 196 px，名字再长也只能裁尾巴：宁可省略号，别把别名整段砍没。
+        if wide_len(base) > 25:
+            while base and wide_len(base) + 2 > 25:      # "…" 本身占两格
+                base = base[:-1]
+            base += "…"
         return ("★" if s.norad in fav else " ") + base
 
     def fill_list(self):
-        q = self.e_search.get().strip().lower()
+        q = self.e_search.get().strip()
         fav = set(self.cfg.get("fav", []))
         tz = self.cur_tz()
-        items = []
-        for s in self.sats:
-            if q and q not in s.name.lower() and q not in str(s.norad):
-                continue
-            items.append(s)
+        if q:
+            items = [s for s in self.sats if sat_match(s, q)]
+        else:
+            am = self._amateur_norads()
+            items = [s for s in self.sats if s.norad in am]
+        # 排序键里有"下次过境"，所以这一列必须先在当前这几行上补齐再排。
+        self._fill_nextp(items)
         key = self.list_sort
         if key == "time":
             items.sort(key=lambda s: (s.norad not in fav, self._grade(s),
@@ -1733,19 +2000,51 @@ class Tool(tk.Tk):
         """下行框标红：框里的数现在给不出可用频率（用的是上一个有效值）。"""
         self.ent_custom_down.config(bg=BAD if bad else CARD)
 
+    def _manual_freq(self, norad):
+        """操作员为这颗星手动填过的 (下行, 上行)；没填过返回 None。
+        频点表里没有它，就绝不替它编一个默认值。"""
+        v = (self.cfg.get("freq") or {}).get(str(norad))
+        if not isinstance(v, dict):
+            return None
+        try:
+            down = float(v["down"])
+            up = float(v.get("up") or 0.0)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return (down, up) if down > 0 else None
+
+    def _remember_manual(self, norad, tr0):
+        """手动频点算得出有效转发器就记住，下次重开还在（cfg["freq"]）。
+        只在数值真的变了时落盘，免得每敲一个键写一次配置文件。"""
+        table = self.cfg.setdefault("freq", {})
+        want = {"down": round(tr0.down_mhz, 4), "up": round(tr0.up_mhz, 4)}
+        if table.get(str(norad)) != want:
+            table[str(norad)] = want
+            self.save_cfg()
+
     def _fill_custom_defaults(self, up_from_index=0):
         """切星/切转发器时刷新两个框。
 
         下行默认是该星的标称下行；上行默认是"刚选中的那条转发器"的 up，
         没有就留空（= 仅接收）。进「自定义…」之前记着 _last_trans_i 就是为了
         这个：下拉已经停在最后一项时，current() 已经取不到刚才那条了。
+
+        频点表里没有的星（known=False）两个框都从 cfg["freq"] 回填：它的
+        freq_mhz 是载入时塞的 145.800 占位值，拿去当默认就是把假频点写进电台。
         """
         s = self.sat
         trs = self._trs()
-        down = f"{s.freq_mhz:.4f}" if s else ""
-        up = ""
-        if 0 <= up_from_index < len(trs) and trs[up_from_index].up_mhz:
-            up = f"{trs[up_from_index].up_mhz:.4f}"
+        down = up = ""
+        if s is not None:
+            if s.known:
+                down = f"{s.freq_mhz:.4f}"
+                if 0 <= up_from_index < len(trs) and trs[up_from_index].up_mhz:
+                    up = f"{trs[up_from_index].up_mhz:.4f}"
+            else:
+                saved = self._manual_freq(s.norad)
+                if saved:
+                    down = f"{saved[0]:.4f}"
+                    up = f"{saved[1]:.4f}" if saved[1] else ""
         for e, v in ((self.ent_custom_down, down), (self.ent_custom_up, up)):
             e.delete(0, "end")
             if v:
@@ -1787,12 +2086,17 @@ class Tool(tk.Tk):
         s = self.sat
         if not s:
             return
-        if not s.known:
-            self.lbl_freq.config(text=tr("频率未知"))
-            self.lbl_tone.config(text="")
-            self.lbl_mode.config(text=tr(s.mode or ""))
-            return
         tr0 = self.sel_trans()
+        manual = False
+        if not s.known:
+            if tr0 is None:
+                # 无频点又没填下行：不拿 145.800 冒充这颗星的频点。
+                self.lbl_freq.config(text=tr("频率未知"))
+                self.lbl_tone.config(text="")
+                self.lbl_mode.config(text=tr("手动填下行频点"))
+                return
+            manual = True
+            self._remember_manual(s.norad, tr0)
         if tr0 is None:
             tr0 = sat_freq.Transponder(s.mode or "下行", s.freq_mhz,
                                       getattr(s, "up_mhz", 0.0) or 0.0,
@@ -1805,7 +2109,9 @@ class Tool(tk.Tk):
         else:
             self.lbl_tone.config(text=tr("哑音 {t} Hz").format(t=f"{tr0.tone_hz:g}") if tr0.tone_hz else "")
         # 模式名已经在频率大字里了（"437.5500 MHz · SSTV"），右边再写一遍是叠字。
-        self.lbl_mode.config(text="")
+        # 只有手动填出来的频点要在这里留个记号：这数值不在频点表里，
+        # 下次 AMSAT 改了频率没人会发现。
+        self.lbl_mode.config(text=tr("手动") if manual else "")
 
     def on_trans_change(self, ev=None):
         trs = self._trs()
@@ -1893,10 +2199,13 @@ class Tool(tk.Tk):
         satrec_now = self.satrec
         # 中心频率取当前选中的那条转发器：选 SSTV 就按 437.550 算，默认仍是中继。
         tr_now = self.sel_trans()
-        if sat_now.known:
-            freq = (tr_now.down_mhz if tr_now else sat_now.freq_mhz) * 1e6
-        else:
-            freq = 145.8e6
+        if tr_now is None and not sat_now.known:
+            # 频点表里没有它、下行框又还填不出数：不拿 145.8 假装算过一遍过境。
+            # 上一颗星的过境必须一起清掉，否则屏幕上是 A 星的时间配 B 星的名字。
+            self.show_passes([])
+            self.lbl_status.config(text=tr("先填下行频点"), fg="#d9a95a")
+            return
+        freq = (tr_now.down_mhz if tr_now else sat_now.freq_mhz) * 1e6
         self._recalc_gen = getattr(self, "_recalc_gen", 0) + 1
         gen = self._recalc_gen
         self.lbl_status.config(text=tr("计算中…"), fg=DIM)
@@ -2045,7 +2354,9 @@ class Tool(tk.Tk):
         else:
             tone_txt = self.sat.tone or ""
         mode_txt = tr(tr0.name if tr0 else self.sat.mode)
-        freq = down_mhz * 1e6 if self.sat.known else 145.8e6
+        # 频率取这趟样点自己带的值（算过境时用的就是它），不再按 known 现挑：
+        # 手动频点的星同样要能看详情，而 145.8 那个占位值谁都不该看见。
+        freq = (getattr(p, "freq10", 0) or round(down_mhz * 1e5)) * 10
         tz = self.cur_tz()
         up, tc, dn = local(p.aos, tz), local(p.tca, tz), local(p.los, tz)
         put(tr("升起"), tr("{t}   仰角 {el}°   方位 {az}°").format(
@@ -2077,6 +2388,28 @@ class Tool(tk.Tk):
         d.config(state="disabled")
 
     # --- write queue -------------------------------------------------
+    def _all_sats(self):
+        """池子里所有卫星对象（当前星 + 全量列表 + 列表里显示的那几行），按 norad 去重。
+
+        队列可能攒了好几个星，刷新频率时必须能从 norad 找回各自的星对象；
+        只拿 self.sat 的话，剩下那几颗就全成"找不到星"了。
+        """
+        out, seen = [], set()
+        pool = [self.sat] + list(getattr(self, "sats", None) or []) \
+            + list(getattr(self, "_list", None) or [])
+        for st in pool:
+            if st is None:
+                continue
+            try:
+                key = int(getattr(st, "norad", 0) or 0) or id(st)
+            except (TypeError, ValueError):
+                key = id(st)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(st)
+        return out
+
     def queue_add(self):
         sel = [p for p in self.rows if id(p) in self.checked]
         if not sel:
@@ -2121,9 +2454,6 @@ class Tool(tk.Tk):
     def write_radio(self):
         if self.busy:
             return
-        if not self.sat.known:
-            messagebox.showerror(tr("频率"), tr("无下行频率：sat_freq.py 里补"))
-            return
         if not HAVE_SERIAL:
             messagebox.showerror(tr("串口"), tr("没装 pyserial：pip install pyserial"))
             return
@@ -2136,6 +2466,59 @@ class Tool(tk.Tk):
             messagebox.showerror(tr("过境"), tr("没勾选过境"))
             return
         sel.sort(key=lambda q: q.aos)
+
+        # 队列非空时勾选是被忽略的（这是"攒多颗星一起写"的代价），但不能再
+        # 静默：操作员换了星、勾了别的趟、点写入，结果写进去的还是队列里那几条。
+        checked = [p for p in self.rows if id(p) in self.checked]
+        if self.queue and checked and not all(any(c is q for q in self.queue) for c in checked):
+            log_line("QUEUE", tr("写入用待写队列 {n} 段；{m} 段勾选未参与（要换请先清队列）")
+                     .format(n=len(self.queue), m=len(checked)))
+
+        # 队列里每条都是入队那一刻的快照；写之前按它自己的星 + 转发器重取一次，
+        # 否则改完频率直接写入，落盘还是第一次入队的数（本次 bug 的根因）。
+        try:
+            changed, missing = refresh_entry_freqs(self._all_sats(), sel, self.sat)
+        except Exception as e:                      # 刷新失败不能挡住写入
+            log_line("QUEUE", f"refresh failed: {type(e).__name__}: {e}")
+            changed, missing = 0, []
+
+        if missing:
+            messagebox.showwarning(
+                tr("频率"), tr("这 {n} 段找不到对应的卫星，沿用原频率：\n\n{p}")
+                .format(n=len(missing), p="\n".join(f"    {m}" for m in missing[:8])))
+        for q in sel:
+            log_line("QUEUE", "  {n:<16} {d:.4f} ↓  {u:.4f} ↑  {c}".format(
+                n=str(getattr(q, "name", ""))[:16],
+                d=(getattr(q, "freq10", 0) or 0) / 1e5,
+                u=(getattr(q, "up10", 0) or 0) / 1e5,
+                c=(f"{q.ctcss10 / 10:.1f} Hz" if getattr(q, "ctcss10", 0) else tr("无哑音"))))
+        if changed:
+            log_line("QUEUE", tr("已按当前转发器刷新 {n} 段频率").format(n=changed))
+
+        # 自定义频点没有落在 sat.transponders 里，上面只能按星级默认兜底；
+        # 对"当前这颗星 + 当前这条转发器"的条目，以界面上的值为准。
+        try:
+            tr_now = self.sel_trans()
+            cur_norad = getattr(self.sat, "norad", None)
+            if tr_now is not None and cur_norad is not None:
+                f10, u10, c10 = _trans_freqs(tr_now)
+                for q in sel:
+                    if (getattr(q, "norad", None) == cur_norad
+                            and str(getattr(q, "trans_name", "")) == str(getattr(tr_now, "name", ""))):
+                        q.freq10, q.up10, q.ctcss10 = f10, u10, c10
+        except Exception as e:
+            log_line("QUEUE", f"custom trans refresh skipped: {type(e).__name__}: {e}")
+
+        # 闸门按"这几段有没有下行频点"判，不按 sat.known 判：频点表里的星和
+        # 操作员手动填出来的星走同一条路，两种都要有真数值才放行；0 写进表里
+        # 固件会按 0 Hz 拍，等于发一张废表。
+        nofreq = [q for q in sel if not getattr(q, "freq10", 0)]
+        if nofreq:
+            messagebox.showerror(
+                tr("频率"), tr("{n} 段没有下行频点。\n\n"
+                              "在这颗星的卡片里填「下行 MHz（标称）」，"
+                              "重算过境后再写。").format(n=len(nofreq)))
+            return
 
         # 条数上限是条目区的物理上限（16 + 102×40 = 0x1000），真正决定
         # "装不装得下"的是字节数，不是趟数：10 s 一条 946 B、5 s 一条
@@ -2192,13 +2575,8 @@ class Tool(tk.Tk):
                 up10 = int(round(up_mhz * 1e6 / 10)) if up_mhz else 0
                 ctcss10 = int(round(up_tone * 10)) if up_tone else 0
 
-            for q in sel:
-                if not hasattr(q, "freq10"):
-                    q.name = self.sat.name[:16]
-                    q.freq10 = tr0.freq10 if tr0 else self.sat.freq10
-                    q.up10 = up10
-                    q.ctcss10 = ctcss10
-                    q.trans_name = tr0.name if tr0 else (self.sat.mode or "")
+            # 频率三元组已经在上面 refresh_entry_freqs() 里逐条重取过了
+            # （留在这里的只有"空表兜底"用的 up10/ctcss10 默认值）。
 
             # 样点是按 recalc 那一刻的 step 算出来的；这里如果直接用输入框当前值，
             # 用户改完间隔没重新计算就写表 → 表里 step 字段和样点实际间隔不符，
